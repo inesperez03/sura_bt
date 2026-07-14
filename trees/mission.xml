@@ -1,0 +1,71 @@
+<root main_tree_to_execute="SafetyBranch">
+
+  <BehaviorTree ID="SafetyBranch">
+    <Sequence name="safety_branch">
+
+      <Fallback name="depth_safety_limit">
+        <Sequence name="depth_safety_error">
+          <SafetyError
+            ros_node="{ros_node}"
+            diagnostic_prefix="{diagnostic_prefix}"
+            diagnostics_monitor="{diagnostics_monitor}"
+            diagnostic_suffix="DepthLimit"
+          />
+          <EmergencyWrench
+            reason="depth_limit_error"
+            ros_node="{ros_node}"
+            controller="body_force"
+            priority="85"
+            force_x="0.0"
+            force_y="0.0"
+            force_z="-40.0"
+          />
+        </Sequence>
+
+        <Sequence name="depth_safety_warning">
+          <SafetyWarning
+            ros_node="{ros_node}"
+            diagnostic_prefix="{diagnostic_prefix}"
+            diagnostics_monitor="{diagnostics_monitor}"
+            diagnostic_suffix="DepthLimit"
+          />
+        </Sequence>
+
+        <SafetyOk name="depth_safety_ok"/>
+      </Fallback>
+
+      <Fallback name="area_safety_limit">
+        <Sequence name="area_safety_error">
+          <SafetyError
+            ros_node="{ros_node}"
+            diagnostic_prefix="{diagnostic_prefix}"
+            diagnostics_monitor="{diagnostics_monitor}"
+            diagnostic_suffix="AreaLimit"
+          />
+          <EmergencyWrench
+            reason="area_limit_error"
+            ros_node="{ros_node}"
+            controller="body_force"
+            priority="85"
+            area_recovery="true"
+            area_recovery_force="40.0"
+            diagnostic_suffix="AreaLimit"
+          />
+        </Sequence>
+
+        <Sequence name="area_safety_warning">
+          <SafetyWarning
+            ros_node="{ros_node}"
+            diagnostic_prefix="{diagnostic_prefix}"
+            diagnostics_monitor="{diagnostics_monitor}"
+            diagnostic_suffix="AreaLimit"
+          />
+        </Sequence>
+
+        <SafetyOk name="area_safety_ok"/>
+      </Fallback>
+
+    </Sequence>
+  </BehaviorTree>
+
+</root>
