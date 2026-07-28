@@ -1,0 +1,74 @@
+<root>
+
+  <BehaviorTree ID="AutonomousBranch">
+    <Sequence name="autonomous_branch">
+      <VariableSet name="mission_running" key="mission_state" value="running"/>
+      <ActivateControllers
+        name="activate_body_force"
+        controllers="body_force"
+      />
+      <ReactiveSequence name="wrench_forward_for_2s">
+        <SendWrench
+          name="wrench_forward"
+          force_x="40.0"
+          force_y="0.0"
+          force_z="0.0"
+          torque_x="0.0"
+          torque_y="0.0"
+          torque_z="0.0"
+          priority="75"
+          reason="autonomous_forward_wrench"
+        />
+        <Delay delay_msec="2000">
+          <AlwaysSuccess name="forward_delay_2s"/>
+        </Delay>
+      </ReactiveSequence>
+      <ReactiveSequence name="wrench_right_for_5s">
+        <SendWrench
+          name="wrench_right"
+          force_x="0.0"
+          force_y="40.0"
+          force_z="0.0"
+          torque_x="0.0"
+          torque_y="0.0"
+          torque_z="0.0"
+          priority="75"
+          reason="autonomous_right_wrench"
+        />
+        <Delay delay_msec="5000">
+          <AlwaysSuccess name="right_delay_5s"/>
+        </Delay>
+      </ReactiveSequence>
+      <ReactiveSequence name="wrench_down_for_3s">
+        <SendWrench
+          name="wrench_down"
+          force_x="0.0"
+          force_y="0.0"
+          force_z="40.0"
+          torque_x="0.0"
+          torque_y="0.0"
+          torque_z="0.0"
+          priority="75"
+          reason="autonomous_down_wrench"
+        />
+        <Delay delay_msec="3000">
+          <AlwaysSuccess name="down_delay_3s"/>
+        </Delay>
+      </ReactiveSequence>
+      <SendWrench
+        name="wrench_stop"
+        force_x="0.0"
+        force_y="0.0"
+        force_z="0.0"
+        torque_x="0.0"
+        torque_y="0.0"
+        torque_z="0.0"
+        priority="75"
+        reason="autonomous_stop_wrench"
+      />
+      <VariableSet name="set_mission_completed" key="mission_state" value="completed"/>
+      <MissionCompleted name="mission_completed"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>

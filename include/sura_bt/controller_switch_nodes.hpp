@@ -70,33 +70,6 @@ private:
   rclcpp::Time last_request_time_;
 };
 
-class DeactivateControllersOnce : public BT::SyncActionNode, protected ControllerSwitchBase
-{
-public:
-  DeactivateControllersOnce(
-    const std::string & name,
-    const BT::NodeConfiguration & config);
-
-  static BT::PortsList providedPorts();
-
-  BT::NodeStatus tick() override;
-
-private:
-  rclcpp::Client<SwitchController>::SharedPtr switch_client_;
-};
-
-class ResetDeactivateControllersOnce : public BT::SyncActionNode
-{
-public:
-  ResetDeactivateControllersOnce(
-    const std::string & name,
-    const BT::NodeConfiguration & config);
-
-  static BT::PortsList providedPorts();
-
-  BT::NodeStatus tick() override;
-};
-
 class DeactivateSystem : public BT::SyncActionNode, protected ControllerSwitchBase
 {
 public:

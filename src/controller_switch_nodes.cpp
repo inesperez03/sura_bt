@@ -4,8 +4,6 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
-#include <map>
-#include <mutex>
 #include <sstream>
 
 #include "lifecycle_msgs/msg/state.hpp"
@@ -14,9 +12,6 @@ namespace sura_bt
 {
 namespace
 {
-
-std::mutex once_deactivation_mutex;
-std::map<std::string, bool> once_deactivation_done;
 
 std::string stripSlashes(std::string value)
 {
@@ -101,33 +96,6 @@ BT::PortsList deactivateControllerPorts()
     BT::InputPort<std::string>("controllers"),
     BT::InputPort<double>("cooldown_sec")
   };
-}
-
-BT::PortsList deactivateControllerOncePorts()
-{
-  return {
-    BT::InputPort<std::string>("key"),
-    BT::InputPort<std::string>("controllers")
-  };
-}
-
-bool isOnceDeactivationDone(const std::string & key)
-{
-  std::lock_guard<std::mutex> lock(once_deactivation_mutex);
-  const auto it = once_deactivation_done.find(key);
-  return it != once_deactivation_done.end() && it->second;
-}
-
-void markOnceDeactivationDone(const std::string & key)
-{
-  std::lock_guard<std::mutex> lock(once_deactivation_mutex);
-  once_deactivation_done[key] = true;
-}
-
-bool resetOnceDeactivation(const std::string & key)
-{
-  std::lock_guard<std::mutex> lock(once_deactivation_mutex);
-  return once_deactivation_done.erase(key) > 0;
 }
 
 std::string namespacedSystemName(
@@ -428,100 +396,6 @@ BT::NodeStatus DeactivateControllers::tick()
   }
 
   return status;
-}
-
-DeactivateControllersOnce::DeactivateControllersOnce(
-  const std::string & name,
-  const BT::NodeConfiguration & config)
-: BT::SyncActionNode(name, config)
-{
-  switch_client_ = getRosNode(config)->create_client<SwitchController>(
-    switchControllerServiceName(config));
-}
-
-BT::PortsList DeactivateControllersOnce::providedPorts()
-{
-  return deactivateControllerOncePorts();
-}
-
-BT::NodeStatus DeactivateControllersOnce::tick()
-{
-  const auto ros_node = getRosNode(config());
-  auto key = getInput<std::string>("key");
-  auto controllers_text = getInput<std::string>("controllers");
-  if (!key || key.value().empty())
-  {
-    RCLCPP_ERROR(
-      ros_node->get_logger(),
-      "[sura_bt] DeactivateControllersOnce requires key input");
-    return BT::NodeStatus::FAILURE;
-  }
-  if (!controllers_text)
-  {
-    RCLCPP_ERROR(
-      ros_node->get_logger(),
-      "[sura_bt] DeactivateControllersOnce requires controllers input");
-    return BT::NodeStatus::FAILURE;
-  }
-
-  if (isOnceDeactivationDone(key.value()))
-  {
-    return BT::NodeStatus::SUCCESS;
-  }
-
-  const auto controllers = resolveControllers(
-    config(),
-    controllers_text.value(),
-    ros_node,
-    "DeactivateControllersOnce");
-
-  const auto status = callSwitchController(
-    ros_node,
-    switch_client_,
-    {},
-    controllers,
-    false,
-    true,
-    2.0);
-
-  if (status == BT::NodeStatus::SUCCESS)
-  {
-    markOnceDeactivationDone(key.value());
-
-    RCLCPP_WARN(
-      ros_node->get_logger(),
-      "[sura_bt] Deactivated controllers once. key=%s controllers=%s",
-      key.value().c_str(),
-      controllers_text.value().c_str());
-  }
-
-  return status;
-}
-
-ResetDeactivateControllersOnce::ResetDeactivateControllersOnce(
-  const std::string & name,
-  const BT::NodeConfiguration & config)
-: BT::SyncActionNode(name, config)
-{
-}
-
-BT::PortsList ResetDeactivateControllersOnce::providedPorts()
-{
-  return {
-    BT::InputPort<std::string>("key")
-  };
-}
-
-BT::NodeStatus ResetDeactivateControllersOnce::tick()
-{
-  auto key = getInput<std::string>("key");
-  if (!key || key.value().empty())
-  {
-    return BT::NodeStatus::FAILURE;
-  }
-
-  resetOnceDeactivation(key.value());
-  return BT::NodeStatus::SUCCESS;
 }
 
 DeactivateSystem::DeactivateSystem(

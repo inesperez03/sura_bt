@@ -11,6 +11,7 @@
 #include "yaml-cpp/yaml.h"
 
 #include "sura_bt/controller_switch_nodes.hpp"
+#include "sura_bt/operation_mode_nodes.hpp"
 #include "sura_bt/send_wrench_node.hpp"
 #include "sura_bt/sura_actions_nodes.hpp"
 #include "sura_safety/safety_blackboard.hpp"
@@ -157,11 +158,35 @@ int main(int argc, char ** argv)
   const std::string tree_file =
     ament_index_cpp::get_package_share_directory("sura_bt") +
     "/trees/mission.xml";
+  const std::string safety_tree_file =
+    ament_index_cpp::get_package_share_directory("sura_safety") +
+    "/trees/safety_branch.xml";
+  const std::string autonomous_tree_file =
+    ament_index_cpp::get_package_share_directory("sura_bt") +
+    "/trees/autonomous_branch.xml";
+  const std::string teleop_tree_file =
+    ament_index_cpp::get_package_share_directory("sura_bt") +
+    "/trees/teleop_branch.xml";
 
   RCLCPP_INFO(
     ros_node->get_logger(),
     "Loading tree: %s",
     tree_file.c_str()
+  );
+  RCLCPP_INFO(
+    ros_node->get_logger(),
+    "Loading safety tree: %s",
+    safety_tree_file.c_str()
+  );
+  RCLCPP_INFO(
+    ros_node->get_logger(),
+    "Loading autonomous tree: %s",
+    autonomous_tree_file.c_str()
+  );
+  RCLCPP_INFO(
+    ros_node->get_logger(),
+    "Loading teleop tree: %s",
+    teleop_tree_file.c_str()
   );
 
   auto blackboard = BT::Blackboard::create();
@@ -193,12 +218,6 @@ int main(int argc, char ** argv)
   factory.registerNodeType<sura_bt::DeactivateControllers>(
     "DeactivateControllers");
 
-  factory.registerNodeType<sura_bt::DeactivateControllersOnce>(
-    "DeactivateControllersOnce");
-
-  factory.registerNodeType<sura_bt::ResetDeactivateControllersOnce>(
-    "ResetDeactivateControllersOnce");
-
   factory.registerNodeType<sura_bt::DeactivateSystem>(
     "DeactivateSystem");
 
@@ -208,6 +227,33 @@ int main(int argc, char ** argv)
   factory.registerNodeType<sura_bt::SurfaceAction>(
     "SurfaceAction");
 
+  factory.registerNodeType<sura_bt::GoToPoseAction>(
+    "GoToPoseAction");
+
+  factory.registerNodeType<sura_bt::TeleopRequested>(
+    "TeleopRequested");
+
+  factory.registerNodeType<sura_bt::AutonomousRequested>(
+    "AutonomousRequested");
+
+  factory.registerNodeType<sura_bt::VariableSet>(
+    "VariableSet");
+
+  factory.registerNodeType<sura_bt::VariableIs>(
+    "VariableIs");
+
+  factory.registerNodeType<sura_bt::VariableIsNot>(
+    "VariableIsNot");
+
+  factory.registerNodeType<sura_bt::MissionCompleted>(
+    "MissionCompleted");
+
+  factory.registerNodeType<sura_bt::TeleopSession>(
+    "TeleopSession");
+
+  factory.registerBehaviorTreeFromFile(safety_tree_file);
+  factory.registerBehaviorTreeFromFile(autonomous_tree_file);
+  factory.registerBehaviorTreeFromFile(teleop_tree_file);
   factory.registerBehaviorTreeFromFile(tree_file);
 
   auto tree = factory.createTree("Mission", blackboard);

@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(behaviortree_cpp_v3 REQUIRED)
@@ -19,6 +20,7 @@ find_package(yaml-cpp REQUIRED)
 
 add_executable(bt_runner
   src/controller_switch_nodes.cpp
+  src/operation_mode_nodes.cpp
   src/send_wrench_node.cpp
   src/sura_actions_nodes.cpp
   src/bt_runner.cpp
@@ -34,6 +36,7 @@ target_compile_features(bt_runner PUBLIC cxx_std_17)
 ament_target_dependencies(bt_runner
   rclcpp
   rclcpp_action
+  std_msgs
   lifecycle_msgs
   ament_index_cpp
   behaviortree_cpp_v3

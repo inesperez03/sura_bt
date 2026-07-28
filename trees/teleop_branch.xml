@@ -1,0 +1,20 @@
+<root>
+
+  <BehaviorTree ID="TeleopBranch">
+    <Sequence name="teleop_branch">
+      <IfThenElse name="stop_mission_controllers_if_needed">
+        <VariableIsNot
+          name="mission_not_paused"
+          key="mission_state"
+          value="paused"
+        />
+        <DeactivateControllers controllers="all"/>
+        <AlwaysSuccess name="mission_already_paused"/>
+      </IfThenElse>
+
+      <VariableSet name="mission_paused" key="mission_state" value="paused"/>
+      <TeleopSession name="manual_commands"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>

@@ -89,11 +89,14 @@ SendWrench::SendWrench(
 BT::PortsList SendWrench::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("reason"),
-    BT::InputPort<int>("priority"),
     BT::InputPort<double>("force_x"),
+    BT::InputPort<double>("torque_x"),
     BT::InputPort<double>("force_y"),
-    BT::InputPort<double>("force_z")
+    BT::InputPort<double>("torque_y"),
+    BT::InputPort<double>("force_z"),
+    BT::InputPort<double>("torque_z"),
+    BT::InputPort<int>("priority"),
+    BT::InputPort<std::string>("reason")
   };
 }
 
@@ -119,16 +122,34 @@ BT::NodeStatus SendWrench::tick()
     force_x = 0.0;
   }
 
+  auto torque_x = getInput<double>("torque_x");
+  if (!torque_x)
+  {
+    torque_x = 0.0;
+  }
+
   auto force_y = getInput<double>("force_y");
   if (!force_y)
   {
     force_y = 0.0;
   }
 
+  auto torque_y = getInput<double>("torque_y");
+  if (!torque_y)
+  {
+    torque_y = 0.0;
+  }
+
   auto force_z = getInput<double>("force_z");
   if (!force_z)
   {
     force_z = 0.0;
+  }
+
+  auto torque_z = getInput<double>("torque_z");
+  if (!torque_z)
+  {
+    torque_z = 0.0;
   }
 
   WrenchCommand msg;
@@ -139,18 +160,24 @@ BT::NodeStatus SendWrench::tick()
   msg.wrench.force.x = force_x.value();
   msg.wrench.force.y = force_y.value();
   msg.wrench.force.z = force_z.value();
+  msg.wrench.torque.x = torque_x.value();
+  msg.wrench.torque.y = torque_y.value();
+  msg.wrench.torque.z = torque_z.value();
 
   wrench_pub_->publish(msg);
 
   RCLCPP_ERROR(
     ros_node->get_logger(),
-    "[sura_bt] Action: send wrench. reason=%s controller=%s priority=%u force=(%.3f, %.3f, %.3f)",
+    "[sura_bt] Action: send wrench. reason=%s controller=%s priority=%u force=(%.3f, %.3f, %.3f) torque=(%.3f, %.3f, %.3f)",
     reason.value().c_str(),
     msg.controller.c_str(),
     msg.priority,
     msg.wrench.force.x,
     msg.wrench.force.y,
-    msg.wrench.force.z);
+    msg.wrench.force.z,
+    msg.wrench.torque.x,
+    msg.wrench.torque.y,
+    msg.wrench.torque.z);
 
   return BT::NodeStatus::SUCCESS;
 }
