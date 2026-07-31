@@ -159,7 +159,7 @@ BT::NodeStatus AutonomousRequested::tick()
   {
     std::string mission_state;
     if (config().blackboard->get("mission_state", mission_state) &&
-      mission_state == "completed")
+      (mission_state == "completed" || mission_state == "aborted" || mission_state == "paused"))
     {
       config().blackboard->set("mission_state", std::string{"requested"});
     }
@@ -259,6 +259,83 @@ BT::NodeStatus VariableIsNot::tick()
     current_value == expected_value.value();
 
   return matches ? BT::NodeStatus::FAILURE : BT::NodeStatus::SUCCESS;
+}
+
+MissionControl::MissionControl(
+  const std::string & name,
+  const BT::NodeConfiguration & config)
+: BT::ControlNode(name, config)
+{
+}
+
+BT::PortsList MissionControl::providedPorts()
+{
+  return {};
+}
+
+void MissionControl::halt()
+{
+  current_child_idx_ = 0;
+  BT::ControlNode::halt();
+}
+
+BT::NodeStatus MissionControl::tick()
+{
+  std::string mission_state;
+  if (config().blackboard->get("mission_state", mission_state) &&
+    mission_state == "aborted")
+  {
+    current_child_idx_ = 0;
+    haltChildren();
+    return BT::NodeStatus::FAILURE;
+  }
+
+  std::string mission_control;
+  if (config().blackboard->get("mission_control", mission_control))
+  {
+    if (mission_control == "pause")
+    {
+      if (current_child_idx_ < children_nodes_.size())
+      {
+        haltChild(current_child_idx_);
+      }
+      return BT::NodeStatus::RUNNING;
+    }
+
+    if (mission_control == "abort")
+    {
+      current_child_idx_ = 0;
+      haltChildren();
+      return BT::NodeStatus::FAILURE;
+    }
+  }
+
+  while (current_child_idx_ < children_nodes_.size())
+  {
+    const auto child_status = children_nodes_[current_child_idx_]->executeTick();
+
+    if (child_status == BT::NodeStatus::SUCCESS)
+    {
+      ++current_child_idx_;
+      continue;
+    }
+
+    if (child_status == BT::NodeStatus::RUNNING)
+    {
+      return BT::NodeStatus::RUNNING;
+    }
+
+    if (child_status == BT::NodeStatus::FAILURE)
+    {
+      haltChild(current_child_idx_);
+      current_child_idx_ = 0;
+      return BT::NodeStatus::FAILURE;
+    }
+  }
+
+  current_child_idx_ = 0;
+  haltChildren();
+  return BT::NodeStatus::SUCCESS;
 }
 
 MissionCompleted::MissionCompleted(

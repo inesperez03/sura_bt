@@ -4,6 +4,7 @@
 
 #include "behaviortree_cpp_v3/condition_node.h"
 #include "behaviortree_cpp_v3/action_node.h"
+#include "behaviortree_cpp_v3/control_node.h"
 
 namespace sura_bt
 {
@@ -69,6 +70,23 @@ public:
   static BT::PortsList providedPorts();
 
   BT::NodeStatus tick() override;
+};
+
+class MissionControl : public BT::ControlNode
+{
+public:
+  MissionControl(
+    const std::string & name,
+    const BT::NodeConfiguration & config);
+
+  void halt() override;
+
+  static BT::PortsList providedPorts();
+
+private:
+  BT::NodeStatus tick() override;
+
+  size_t current_child_idx_{0};
 };
 
 class MissionCompleted : public BT::StatefulActionNode

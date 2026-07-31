@@ -245,6 +245,9 @@ int main(int argc, char ** argv)
   factory.registerNodeType<sura_bt::VariableIsNot>(
     "VariableIsNot");
 
+  factory.registerNodeType<sura_bt::MissionControl>(
+    "MissionControl");
+
   factory.registerNodeType<sura_bt::MissionCompleted>(
     "MissionCompleted");
 

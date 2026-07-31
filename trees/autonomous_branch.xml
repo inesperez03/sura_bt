@@ -1,7 +1,7 @@
 <root>
 
   <BehaviorTree ID="AutonomousBranch">
-    <Sequence name="autonomous_branch">
+    <MissionControl name="mission_control">
       <VariableSet name="mission_running" key="mission_state" value="running"/>
       <ActivateControllers
         name="activate_body_force"
@@ -68,7 +68,7 @@
       />
       <VariableSet name="set_mission_completed" key="mission_state" value="completed"/>
       <MissionCompleted name="mission_completed"/>
-    </Sequence>
+    </MissionControl>
   </BehaviorTree>
 
 </root>
