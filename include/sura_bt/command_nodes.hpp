@@ -7,6 +7,7 @@
 
 #include "behaviortree_cpp_v3/action_node.h"
 #include "sura_msgs/msg/navigator.hpp"
+#include "sura_msgs/msg/sura_velocity_command.hpp"
 #include "sura_msgs/msg/sura_wrench_command.hpp"
 
 namespace sura_bt
@@ -20,6 +21,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 
@@ -27,6 +29,24 @@ private:
   using WrenchCommand = sura_msgs::msg::SuraWrenchCommand;
 
   rclcpp::Publisher<WrenchCommand>::SharedPtr wrench_pub_;
+};
+
+class SendVelocity : public BT::SyncActionNode
+{
+public:
+  SendVelocity(
+    const std::string & name,
+    const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts();
+  static const char * main_description();
+
+  BT::NodeStatus tick() override;
+
+private:
+  using VelocityCommand = sura_msgs::msg::SuraVelocityCommand;
+
+  rclcpp::Publisher<VelocityCommand>::SharedPtr velocity_pub_;
 };
 
 class ComputeAreaRecoveryForce : public BT::SyncActionNode
@@ -37,6 +57,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 

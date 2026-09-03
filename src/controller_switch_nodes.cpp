@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <map>
+#include <set>
 #include <cmath>
 #include <sstream>
 
@@ -64,6 +66,117 @@ bool isAllControllersRequest(const std::vector<std::string> & controllers)
   return controllers.size() == 1 && controllers.front() == "all";
 }
 
+std::vector<std::string> deduplicatePreservingOrder(const std::vector<std::string> & values)
+{
+  std::vector<std::string> result;
+  std::set<std::string> seen;
+
+  for (const auto & value : values)
+  {
+    if (seen.insert(value).second)
+    {
+      result.push_back(value);
+    }
+  }
+
+  return result;
+}
+
+std::vector<std::string> stackForController(const std::string & controller)
+{
+  static const std::map<std::string, std::vector<std::string>> stacks{
+    {"body_force", {"body_force"}},
+    {"depth_hold", {"body_force", "depth_hold"}},
+    {"body_velocity", {"body_force", "depth_hold", "body_velocity"}},
+    {"stabilize", {"body_force", "stabilize"}},
+    {"position_hold", {"body_force", "depth_hold", "body_velocity", "position_hold"}},
+    {"mpc_4dof", {"body_force", "mpc_4dof"}},
+    {"thruster_test_controller", {"thruster_test_controller"}},
+    {"lights_controller", {"lights_controller"}}
+  };
+
+  const auto stack = stacks.find(controller);
+  if (stack != stacks.end())
+  {
+    return stack->second;
+  }
+
+  return {controller};
+}
+
+std::vector<std::string> expandControllerStack(const std::vector<std::string> & controllers)
+{
+  std::vector<std::string> expanded;
+
+  for (const auto & controller : controllers)
+  {
+    const auto stack = stackForController(controller);
+    expanded.insert(expanded.end(), stack.begin(), stack.end());
+  }
+
+  return deduplicatePreservingOrder(expanded);
+}
+
+std::vector<std::string> orderLikeSwitchableControllers(
+  const std::vector<std::string> & controllers,
+  const std::vector<std::string> & switchable_controllers)
+{
+  std::vector<std::string> ordered;
+  const std::set<std::string> requested(controllers.begin(), controllers.end());
+  std::set<std::string> added;
+
+  for (const auto & controller : switchable_controllers)
+  {
+    if (requested.count(controller) > 0 && added.insert(controller).second)
+    {
+      ordered.push_back(controller);
+    }
+  }
+
+  for (const auto & controller : controllers)
+  {
+    if (added.insert(controller).second)
+    {
+      ordered.push_back(controller);
+    }
+  }
+
+  return ordered;
+}
+
+std::vector<std::string> controllersNotInDesiredStack(
+  const std::vector<std::string> & desired_stack,
+  const std::vector<std::string> & switchable_controllers)
+{
+  std::vector<std::string> deactivate_controllers;
+  const std::set<std::string> desired(desired_stack.begin(), desired_stack.end());
+
+  for (const auto & controller : switchable_controllers)
+  {
+    if (desired.count(controller) == 0)
+    {
+      deactivate_controllers.push_back(controller);
+    }
+  }
+
+  return deactivate_controllers;
+}
+
+std::string joinControllers(const std::vector<std::string> & controllers)
+{
+  std::stringstream controller_list;
+  for (size_t i = 0; i < controllers.size(); ++i)
+  {
+    if (i > 0)
+    {
+      controller_list << ",";
+    }
+    controller_list << controllers[i];
+  }
+
+  return controller_list.str();
+}
+
 int64_t secondsToNanoseconds(double seconds)
 {
   if (!std::isfinite(seconds) || seconds < 0.0)
@@ -86,15 +199,21 @@ void setTimeout(
 BT::PortsList activateControllerPorts()
 {
   return {
-    BT::InputPort<std::string>("controllers")
+    BT::InputPort<std::string>(
+      "controllers",
+      "Comma-separated controller names to activate for the requested behavior.")
   };
 }
 
 BT::PortsList deactivateControllerPorts()
 {
   return {
-    BT::InputPort<std::string>("controllers"),
-    BT::InputPort<double>("cooldown_sec")
+    BT::InputPort<std::string>(
+      "controllers",
+      "Comma-separated controller names to deactivate, or 'all' for every switchable controller."),
+    BT::InputPort<double>(
+      "cooldown_sec",
+      "Minimum time between repeated deactivation requests, in seconds.")
   };
 }
 
@@ -287,6 +406,11 @@ BT::PortsList ActivateControllers::providedPorts()
   return activateControllerPorts();
 }
 
+const char * ActivateControllers::main_description()
+{
+  return "Activates the requested set of controllers.";
+}
+
 BT::NodeStatus ActivateControllers::tick()
 {
   const auto ros_node = getRosNode(config());
@@ -308,11 +432,26 @@ BT::NodeStatus ActivateControllers::tick()
     return BT::NodeStatus::FAILURE;
   }
 
+  const auto switchable_controllers = getSwitchableControllers(config());
+  const auto desired_stack = orderLikeSwitchableControllers(
+    expandControllerStack(controllers),
+    switchable_controllers);
+  const auto deactivate_controllers = controllersNotInDesiredStack(
+    desired_stack,
+    switchable_controllers);
+
+  RCLCPP_INFO(
+    ros_node->get_logger(),
+    "[sura_bt] ActivateControllers resolved requested=\"%s\" to activate=\"%s\" deactivate=\"%s\"",
+    controllers_text.value().c_str(),
+    joinControllers(desired_stack).c_str(),
+    joinControllers(deactivate_controllers).c_str());
+
   const auto status = callSwitchController(
     ros_node,
     switch_client_,
-    controllers,
-    {},
+    desired_stack,
+    deactivate_controllers,
     false,
     true,
     2.0);
@@ -340,6 +479,11 @@ DeactivateControllers::DeactivateControllers(
 BT::PortsList DeactivateControllers::providedPorts()
 {
   return deactivateControllerPorts();
+}
+
+const char * DeactivateControllers::main_description()
+{
+  return "Deactivates the requested set of controllers.";
 }
 
 BT::NodeStatus DeactivateControllers::tick()
@@ -410,9 +554,18 @@ DeactivateSystem::DeactivateSystem(
 BT::PortsList DeactivateSystem::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("system"),
-    BT::InputPort<double>("cooldown_sec")
+    BT::InputPort<std::string>(
+      "system",
+      "Hardware system or component to deactivate."),
+    BT::InputPort<double>(
+      "cooldown_sec",
+      "Minimum time between repeated deactivation requests for the same system, in seconds.")
   };
+}
+
+const char * DeactivateSystem::main_description()
+{
+  return "Deactivates a requested hardware system or component.";
 }
 
 BT::NodeStatus DeactivateSystem::tick()
@@ -512,10 +665,21 @@ SetControllerInterlock::SetControllerInterlock(
 BT::PortsList SetControllerInterlock::providedPorts()
 {
   return {
-    BT::InputPort<bool>("enabled"),
-    BT::InputPort<std::string>("reason"),
-    BT::InputPort<std::string>("controllers")
+    BT::InputPort<bool>(
+      "enabled",
+      "Whether the controller interlock should be enabled."),
+    BT::InputPort<std::string>(
+      "reason",
+      "Mission-level reason for changing the controller interlock state."),
+    BT::InputPort<std::string>(
+      "controllers",
+      "Comma-separated controller names affected when the interlock is enabled.")
   };
+}
+
+const char * SetControllerInterlock::main_description()
+{
+  return "Enables or disables a controller interlock for selected controllers.";
 }
 
 BT::NodeStatus SetControllerInterlock::tick()

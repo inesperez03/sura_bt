@@ -1,4 +1,4 @@
-#include "sura_bt/send_wrench_node.hpp"
+#include "sura_bt/command_nodes.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -89,15 +89,20 @@ SendWrench::SendWrench(
 BT::PortsList SendWrench::providedPorts()
 {
   return {
-    BT::InputPort<double>("force_x"),
-    BT::InputPort<double>("torque_x"),
-    BT::InputPort<double>("force_y"),
-    BT::InputPort<double>("torque_y"),
-    BT::InputPort<double>("force_z"),
-    BT::InputPort<double>("torque_z"),
-    BT::InputPort<int>("priority"),
-    BT::InputPort<std::string>("reason")
+    BT::InputPort<double>("force_x", "Body-frame force command along the X axis."),
+    BT::InputPort<double>("torque_x", "Body-frame torque command around the X axis."),
+    BT::InputPort<double>("force_y", "Body-frame force command along the Y axis."),
+    BT::InputPort<double>("torque_y", "Body-frame torque command around the Y axis."),
+    BT::InputPort<double>("force_z", "Body-frame force command along the Z axis."),
+    BT::InputPort<double>("torque_z", "Body-frame torque command around the Z axis."),
+    BT::InputPort<int>("priority", "Priority of the wrench command from 1 to 100."),
+    BT::InputPort<std::string>("reason", "Mission-level reason for sending this wrench command.")
   };
+}
+
+const char * SendWrench::main_description()
+{
+  return "Publishes a body-frame wrench command for the underwater vehicle.";
 }
 
 BT::NodeStatus SendWrench::tick()
@@ -182,6 +187,121 @@ BT::NodeStatus SendWrench::tick()
   return BT::NodeStatus::SUCCESS;
 }
 
+SendVelocity::SendVelocity(
+  const std::string & name,
+  const BT::NodeConfiguration & config)
+: BT::SyncActionNode(name, config)
+{
+  const auto ros_node = getRosNode(config);
+  const auto robot_namespace =
+    config.blackboard->get<std::string>("robot_namespace");
+
+  velocity_pub_ = ros_node->create_publisher<VelocityCommand>(
+    namespacedTopic(robot_namespace, "controller/arbitrator/velocity"),
+    rclcpp::SystemDefaultsQoS());
+}
+
+BT::PortsList SendVelocity::providedPorts()
+{
+  return {
+    BT::InputPort<double>("linear_x", "Body-frame linear velocity command along the X axis."),
+    BT::InputPort<double>("angular_x", "Body-frame angular velocity command around the X axis."),
+    BT::InputPort<double>("linear_y", "Body-frame linear velocity command along the Y axis."),
+    BT::InputPort<double>("angular_y", "Body-frame angular velocity command around the Y axis."),
+    BT::InputPort<double>("linear_z", "Body-frame linear velocity command along the Z axis."),
+    BT::InputPort<double>("angular_z", "Body-frame angular velocity command around the Z axis."),
+    BT::InputPort<int>("priority", "Priority of the velocity command from 1 to 100."),
+    BT::InputPort<std::string>("reason", "Mission-level reason for sending this velocity command.")
+  };
+}
+
+const char * SendVelocity::main_description()
+{
+  return "Publishes a body-frame velocity command for the underwater vehicle.";
+}
+
+BT::NodeStatus SendVelocity::tick()
+{
+  const auto ros_node = getRosNode(config());
+
+  auto reason = getInput<std::string>("reason");
+  if (!reason)
+  {
+    reason = "unknown";
+  }
+
+  auto priority = getInput<int>("priority");
+  if (!priority)
+  {
+    priority = 85;
+  }
+
+  auto linear_x = getInput<double>("linear_x");
+  if (!linear_x)
+  {
+    linear_x = 0.0;
+  }
+
+  auto angular_x = getInput<double>("angular_x");
+  if (!angular_x)
+  {
+    angular_x = 0.0;
+  }
+
+  auto linear_y = getInput<double>("linear_y");
+  if (!linear_y)
+  {
+    linear_y = 0.0;
+  }
+
+  auto angular_y = getInput<double>("angular_y");
+  if (!angular_y)
+  {
+    angular_y = 0.0;
+  }
+
+  auto linear_z = getInput<double>("linear_z");
+  if (!linear_z)
+  {
+    linear_z = 0.0;
+  }
+
+  auto angular_z = getInput<double>("angular_z");
+  if (!angular_z)
+  {
+    angular_z = 0.0;
+  }
+
+  VelocityCommand msg;
+  msg.header.stamp = ros_node->now();
+  msg.requester = "sura_safety";
+  msg.controller = "body_velocity";
+  msg.priority = static_cast<uint8_t>(std::clamp(priority.value(), 1, 100));
+  msg.velocity.linear.x = linear_x.value();
+  msg.velocity.linear.y = linear_y.value();
+  msg.velocity.linear.z = linear_z.value();
+  msg.velocity.angular.x = angular_x.value();
+  msg.velocity.angular.y = angular_y.value();
+  msg.velocity.angular.z = angular_z.value();
+
+  velocity_pub_->publish(msg);
+
+  RCLCPP_ERROR(
+    ros_node->get_logger(),
+    "[sura_bt] Action: send velocity. reason=%s controller=%s priority=%u linear=(%.3f, %.3f, %.3f) angular=(%.3f, %.3f, %.3f)",
+    reason.value().c_str(),
+    msg.controller.c_str(),
+    msg.priority,
+    msg.velocity.linear.x,
+    msg.velocity.linear.y,
+    msg.velocity.linear.z,
+    msg.velocity.angular.x,
+    msg.velocity.angular.y,
+    msg.velocity.angular.z);
+
+  return BT::NodeStatus::SUCCESS;
+}
+
 ComputeAreaRecoveryForce::ComputeAreaRecoveryForce(
   const std::string & name,
   const BT::NodeConfiguration & config)
@@ -200,12 +320,17 @@ ComputeAreaRecoveryForce::ComputeAreaRecoveryForce(
 BT::PortsList ComputeAreaRecoveryForce::providedPorts()
 {
   return {
-    BT::InputPort<double>("force"),
-    BT::InputPort<std::string>("diagnostic_name"),
-    BT::InputPort<std::string>("diagnostic_suffix"),
-    BT::OutputPort<double>("output_x"),
-    BT::OutputPort<double>("output_y")
+    BT::InputPort<double>("force", "Magnitude of the recovery force to direct the vehicle back inside the allowed area."),
+    BT::InputPort<std::string>("diagnostic_name", "Full diagnostic entry used to determine the area limit violation."),
+    BT::InputPort<std::string>("diagnostic_suffix", "Diagnostic suffix used to locate the area limit diagnostic when no full name is provided."),
+    BT::OutputPort<double>("output_x", "Computed body-frame force along the X axis."),
+    BT::OutputPort<double>("output_y", "Computed body-frame force along the Y axis.")
   };
+}
+
+const char * ComputeAreaRecoveryForce::main_description()
+{
+  return "Computes a recovery force that drives the vehicle back inside the allowed operation area.";
 }
 
 void ComputeAreaRecoveryForce::navigatorCallback(const Navigator::SharedPtr msg)

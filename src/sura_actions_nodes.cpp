@@ -45,7 +45,7 @@ bool isFinite(double value)
 SurfaceAction::SurfaceAction(
   const std::string & name,
   const BT::NodeConfiguration & config)
-: BT::SyncActionNode(name, config)
+: BT::StatefulActionNode(name, config)
 {
   action_client_ =
     rclcpp_action::create_client<Surface>(
@@ -56,16 +56,21 @@ SurfaceAction::SurfaceAction(
 BT::PortsList SurfaceAction::providedPorts()
 {
   return {
-    BT::InputPort<double>("target_depth"),
-    BT::InputPort<double>("depth_tolerance"),
-    BT::InputPort<double>("timeout"),
-    BT::InputPort<double>("surface_force_z"),
-    BT::OutputPort<double>("final_depth"),
-    BT::OutputPort<std::string>("message")
+    BT::InputPort<double>("target_depth", "Target depth considered as the surface."),
+    BT::InputPort<double>("depth_tolerance", "Acceptable distance from the target depth."),
+    BT::InputPort<double>("timeout", "Maximum time allowed for the surfacing action to complete, in seconds."),
+    BT::InputPort<double>("surface_force_z", "Vertical force used to drive the vehicle upward while surfacing."),
+    BT::OutputPort<double>("final_depth", "Final depth reached after the surfacing action."),
+    BT::OutputPort<std::string>("message", "Result message reported by the surfacing action.")
   };
 }
 
-BT::NodeStatus SurfaceAction::tick()
+const char * SurfaceAction::main_description()
+{
+  return "Brings the underwater vehicle to the surface.";
+}
+
+BT::NodeStatus SurfaceAction::onStart()
 {
   const auto ros_node = getRosNode(config());
 
@@ -80,6 +85,7 @@ BT::NodeStatus SurfaceAction::tick()
     positiveOrDefault(depth_tolerance.value(), 0.10) : 0.10;
   goal.timeout = timeout ? positiveOrDefault(timeout.value(), 30.0) : 30.0;
   goal.surface_force_z = surface_force_z ? surface_force_z.value() : -40.0;
+  active_goal_timeout_ = goal.timeout;
 
   if (goal.surface_force_z >= 0.0)
   {
@@ -89,7 +95,7 @@ BT::NodeStatus SurfaceAction::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  if (!action_client_->wait_for_action_server(std::chrono::duration<double>(goal.timeout)))
+  if (!action_client_->wait_for_action_server(std::chrono::duration<double>(1.0)))
   {
     RCLCPP_ERROR(
       ros_node->get_logger(),
@@ -98,6 +104,39 @@ BT::NodeStatus SurfaceAction::tick()
   }
 
   auto send_goal_options = rclcpp_action::Client<Surface>::SendGoalOptions();
+  resetGoalState(true);
+  const uint64_t goal_id = active_goal_id_;
+
+  send_goal_options.goal_response_callback =
+    [this, goal_id](GoalHandleSurface::SharedPtr goal_handle)
+    {
+      std::lock_guard<std::mutex> lock(goal_mutex_);
+      if (goal_id != active_goal_id_)
+      {
+        if (goal_handle)
+        {
+          (void)action_client_->async_cancel_goal(goal_handle);
+        }
+        return;
+      }
+
+      goal_response_received_ = true;
+
+      if (!goal_handle)
+      {
+        goal_rejected_ = true;
+        return;
+      }
+
+      if (cancel_requested_)
+      {
+        (void)action_client_->async_cancel_goal(goal_handle);
+        return;
+      }
+
+      goal_handle_ = goal_handle;
+    };
+
   send_goal_options.feedback_callback =
     [ros_node](
       GoalHandleSurface::SharedPtr,
@@ -112,44 +151,109 @@ BT::NodeStatus SurfaceAction::tick()
         feedback->state.c_str());
     };
 
-  auto goal_handle_future = action_client_->async_send_goal(goal, send_goal_options);
-  const auto goal_handle_status = rclcpp::spin_until_future_complete(
-    ros_node,
-    goal_handle_future,
-    std::chrono::duration<double>(goal.timeout));
+  send_goal_options.result_callback =
+    [this, goal_id](const WrappedResult & wrapped_result)
+    {
+      std::lock_guard<std::mutex> lock(goal_mutex_);
+      if (!goal_active_ || goal_id != active_goal_id_)
+      {
+        return;
+      }
+      wrapped_result_ = wrapped_result;
+      result_received_ = true;
+    };
 
-  if (goal_handle_status != rclcpp::FutureReturnCode::SUCCESS)
+  (void)action_client_->async_send_goal(goal, send_goal_options);
+  active_goal_start_time_ = ros_node->now();
+
+  RCLCPP_INFO(
+    ros_node->get_logger(),
+    "[sura_bt] Surface goal sent: target_depth=%.3f tolerance=%.3f timeout=%.3f surface_force_z=%.3f",
+    goal.target_depth,
+    goal.depth_tolerance,
+    goal.timeout,
+    goal.surface_force_z);
+
+  return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus SurfaceAction::onRunning()
+{
+  const auto ros_node = getRosNode(config());
+
+  if (
+    active_goal_timeout_ > 0.0 &&
+    (ros_node->now() - active_goal_start_time_).seconds() > active_goal_timeout_ + 1.0)
   {
     RCLCPP_ERROR(
       ros_node->get_logger(),
-      "[sura_bt] Surface goal request timed out");
+      "[sura_bt] Surface timed out in BT");
+    {
+      std::lock_guard<std::mutex> lock(goal_mutex_);
+      cancel_requested_ = true;
+      if (goal_handle_)
+      {
+        (void)action_client_->async_cancel_goal(goal_handle_);
+      }
+    }
+    resetGoalState(false);
     return BT::NodeStatus::FAILURE;
   }
 
-  const auto goal_handle = goal_handle_future.get();
-  if (!goal_handle)
+  WrappedResult wrapped_result;
+  bool goal_rejected = false;
+  {
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    goal_rejected = goal_rejected_;
+
+    if (!goal_rejected && (!goal_response_received_ || !result_received_))
+    {
+      return BT::NodeStatus::RUNNING;
+    }
+
+    if (!goal_rejected)
+    {
+      wrapped_result = wrapped_result_;
+    }
+  }
+
+  if (goal_rejected)
   {
     RCLCPP_ERROR(
       ros_node->get_logger(),
       "[sura_bt] Surface goal was rejected");
+    resetGoalState(false);
     return BT::NodeStatus::FAILURE;
   }
 
-  auto result_future = action_client_->async_get_result(goal_handle);
-  const auto result_status = rclcpp::spin_until_future_complete(
-    ros_node,
-    result_future,
-    std::chrono::duration<double>(goal.timeout + 1.0));
+  resetGoalState(false);
+  return handleResult(wrapped_result);
+}
 
-  if (result_status != rclcpp::FutureReturnCode::SUCCESS)
+void SurfaceAction::onHalted()
+{
+  const auto ros_node = getRosNode(config());
+  GoalHandleSurface::SharedPtr goal_handle;
   {
-    RCLCPP_ERROR(
-      ros_node->get_logger(),
-      "[sura_bt] Surface result timed out");
-    return BT::NodeStatus::FAILURE;
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    cancel_requested_ = true;
+    goal_active_ = false;
+    active_goal_id_ = 0;
+    goal_handle = goal_handle_;
   }
 
-  const auto wrapped_result = result_future.get();
+  if (goal_handle)
+  {
+    RCLCPP_INFO(
+      ros_node->get_logger(),
+      "[sura_bt] Surface halted: canceling active goal");
+    (void)action_client_->async_cancel_goal(goal_handle);
+  }
+}
+
+BT::NodeStatus SurfaceAction::handleResult(const WrappedResult & wrapped_result)
+{
+  const auto ros_node = getRosNode(config());
   const auto result = wrapped_result.result;
   if (result)
   {
@@ -173,6 +277,18 @@ BT::NodeStatus SurfaceAction::tick()
     "[sura_bt] Surface action failed: %s",
     result ? result->message.c_str() : "missing result");
   return BT::NodeStatus::FAILURE;
+}
+
+void SurfaceAction::resetGoalState(bool active)
+{
+  std::lock_guard<std::mutex> lock(goal_mutex_);
+  goal_active_ = active;
+  active_goal_id_ = active ? ++next_goal_id_ : 0;
+  goal_response_received_ = false;
+  goal_rejected_ = false;
+  result_received_ = false;
+  cancel_requested_ = false;
+  goal_handle_.reset();
 }
 
 std::string SurfaceAction::actionName(const BT::NodeConfiguration & config) const
@@ -202,15 +318,20 @@ GoToPoseAction::GoToPoseAction(
 BT::PortsList GoToPoseAction::providedPorts()
 {
   return {
-    BT::InputPort<double>("x"),
-    BT::InputPort<double>("y"),
-    BT::InputPort<double>("z"),
-    BT::InputPort<double>("yaw"),
-    BT::InputPort<bool>("holonomic", false, "Use holonomic XY control"),
-    BT::InputPort<double>("timeout", 120.0, "Goal timeout in seconds"),
-    BT::InputPort<std::string>("frame_id", "world_ned", "Target pose frame"),
-    BT::OutputPort<std::string>("message")
+    BT::InputPort<double>("x", "Target X position in the selected frame."),
+    BT::InputPort<double>("y", "Target Y position in the selected frame."),
+    BT::InputPort<double>("z", "Target Z position in the selected frame."),
+    BT::InputPort<double>("yaw", "Target yaw angle in radians."),
+    BT::InputPort<bool>("holonomic", false, "Whether to allow holonomic XY motion toward the target pose."),
+    BT::InputPort<double>("timeout", 120.0, "Maximum time allowed to reach the target pose, in seconds."),
+    BT::InputPort<std::string>("frame_id", "world_ned", "Coordinate frame used for the target pose."),
+    BT::OutputPort<std::string>("message", "Result message reported by the go-to-pose action.")
   };
+}
+
+const char * GoToPoseAction::main_description()
+{
+  return "Moves the underwater vehicle to a requested target pose.";
 }
 
 BT::NodeStatus GoToPoseAction::onStart()

@@ -113,8 +113,13 @@ BT::PortsList TeleopRequested::providedPorts()
 {
   return {
     BT::InputPort<std::string>(
-      "topic", "teleop/autonomous_enabled", "Autonomous mode topic")
+      "topic", "teleop/autonomous_enabled", "Topic that indicates whether autonomous mode is requested.")
   };
+}
+
+const char * TeleopRequested::main_description()
+{
+  return "Checks whether teleoperation mode is currently requested.";
 }
 
 BT::NodeStatus TeleopRequested::tick()
@@ -140,8 +145,13 @@ BT::PortsList AutonomousRequested::providedPorts()
 {
   return {
     BT::InputPort<std::string>(
-      "topic", "teleop/autonomous_enabled", "Autonomous mode topic")
+      "topic", "teleop/autonomous_enabled", "Topic that indicates whether autonomous mode is requested.")
   };
+}
+
+const char * AutonomousRequested::main_description()
+{
+  return "Checks whether autonomous mission execution is currently requested.";
 }
 
 BT::NodeStatus AutonomousRequested::tick()
@@ -179,9 +189,14 @@ VariableSet::VariableSet(
 BT::PortsList VariableSet::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("key"),
-    BT::InputPort<std::string>("value")
+    BT::InputPort<std::string>("key", "Blackboard variable name to write."),
+    BT::InputPort<std::string>("value", "Value to store in the blackboard variable.")
   };
+}
+
+const char * VariableSet::main_description()
+{
+  return "Stores a mission variable in the behavior tree blackboard.";
 }
 
 BT::NodeStatus VariableSet::tick()
@@ -207,9 +222,14 @@ VariableIs::VariableIs(
 BT::PortsList VariableIs::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("key"),
-    BT::InputPort<std::string>("value")
+    BT::InputPort<std::string>("key", "Blackboard variable name to compare."),
+    BT::InputPort<std::string>("value", "Expected value of the blackboard variable.")
   };
+}
+
+const char * VariableIs::main_description()
+{
+  return "Checks whether a mission variable matches an expected value.";
 }
 
 BT::NodeStatus VariableIs::tick()
@@ -239,9 +259,14 @@ VariableIsNot::VariableIsNot(
 BT::PortsList VariableIsNot::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("key"),
-    BT::InputPort<std::string>("value")
+    BT::InputPort<std::string>("key", "Blackboard variable name to compare."),
+    BT::InputPort<std::string>("value", "Value that the blackboard variable must not match.")
   };
+}
+
+const char * VariableIsNot::main_description()
+{
+  return "Checks whether a mission variable differs from a given value.";
 }
 
 BT::NodeStatus VariableIsNot::tick()
@@ -271,6 +296,11 @@ MissionControl::MissionControl(
 BT::PortsList MissionControl::providedPorts()
 {
   return {};
+}
+
+const char * MissionControl::main_description()
+{
+  return "Runs mission children while honoring pause and abort mission control states.";
 }
 
 void MissionControl::halt()
@@ -350,6 +380,11 @@ BT::PortsList MissionCompleted::providedPorts()
   return {};
 }
 
+const char * MissionCompleted::main_description()
+{
+  return "Keeps the tree running while the mission is in the completed state.";
+}
+
 BT::NodeStatus MissionCompleted::onStart()
 {
   return isCompleted() ? BT::NodeStatus::RUNNING : BT::NodeStatus::FAILURE;
@@ -381,6 +416,11 @@ TeleopSession::TeleopSession(
 BT::PortsList TeleopSession::providedPorts()
 {
   return {};
+}
+
+const char * TeleopSession::main_description()
+{
+  return "Marks an active teleoperation session while teleop control is running.";
 }
 
 BT::NodeStatus TeleopSession::onStart()

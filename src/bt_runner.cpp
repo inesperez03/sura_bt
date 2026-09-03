@@ -10,10 +10,7 @@
 #include "behaviortree_cpp_v3/loggers/bt_zmq_publisher.h"
 #include "yaml-cpp/yaml.h"
 
-#include "sura_bt/controller_switch_nodes.hpp"
-#include "sura_bt/operation_mode_nodes.hpp"
-#include "sura_bt/send_wrench_node.hpp"
-#include "sura_bt/sura_actions_nodes.hpp"
+#include "sura_bt/register_nodes.hpp"
 #include "sura_safety/safety_blackboard.hpp"
 
 static std::string getArgumentValue(
@@ -206,53 +203,7 @@ int main(int argc, char ** argv)
     blackboard,
     robot_namespace);
 
-  factory.registerNodeType<sura_bt::SendWrench>(
-    "SendWrench");
-
-  factory.registerNodeType<sura_bt::ComputeAreaRecoveryForce>(
-    "ComputeAreaRecoveryForce");
-
-  factory.registerNodeType<sura_bt::ActivateControllers>(
-    "ActivateControllers");
-
-  factory.registerNodeType<sura_bt::DeactivateControllers>(
-    "DeactivateControllers");
-
-  factory.registerNodeType<sura_bt::DeactivateSystem>(
-    "DeactivateSystem");
-
-  factory.registerNodeType<sura_bt::SetControllerInterlock>(
-    "SetControllerInterlock");
-
-  factory.registerNodeType<sura_bt::SurfaceAction>(
-    "SurfaceAction");
-
-  factory.registerNodeType<sura_bt::GoToPoseAction>(
-    "GoToPoseAction");
-
-  factory.registerNodeType<sura_bt::TeleopRequested>(
-    "TeleopRequested");
-
-  factory.registerNodeType<sura_bt::AutonomousRequested>(
-    "AutonomousRequested");
-
-  factory.registerNodeType<sura_bt::VariableSet>(
-    "VariableSet");
-
-  factory.registerNodeType<sura_bt::VariableIs>(
-    "VariableIs");
-
-  factory.registerNodeType<sura_bt::VariableIsNot>(
-    "VariableIsNot");
-
-  factory.registerNodeType<sura_bt::MissionControl>(
-    "MissionControl");
-
-  factory.registerNodeType<sura_bt::MissionCompleted>(
-    "MissionCompleted");
-
-  factory.registerNodeType<sura_bt::TeleopSession>(
-    "TeleopSession");
+  sura_bt::registerNodes(factory);
 
   factory.registerBehaviorTreeFromFile(safety_tree_file);
   factory.registerBehaviorTreeFromFile(autonomous_tree_file);

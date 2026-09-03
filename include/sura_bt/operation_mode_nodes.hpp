@@ -17,6 +17,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 };
@@ -29,6 +30,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 
@@ -44,6 +46,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 };
@@ -56,6 +59,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 };
@@ -68,6 +72,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus tick() override;
 };
@@ -82,6 +87,7 @@ public:
   void halt() override;
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
 private:
   BT::NodeStatus tick() override;
@@ -97,6 +103,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
@@ -114,6 +121,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;

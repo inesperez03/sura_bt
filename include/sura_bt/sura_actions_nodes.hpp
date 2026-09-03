@@ -16,24 +16,42 @@
 namespace sura_bt
 {
 
-class SurfaceAction : public BT::SyncActionNode
+class SurfaceAction : public BT::StatefulActionNode
 {
 public:
   using Surface = sura_actions::action::Surface;
   using GoalHandleSurface = rclcpp_action::ClientGoalHandle<Surface>;
+  using WrappedResult = GoalHandleSurface::WrappedResult;
 
   SurfaceAction(
     const std::string & name,
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
-  BT::NodeStatus tick() override;
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
 
 private:
   std::string actionName(const BT::NodeConfiguration & config) const;
+  BT::NodeStatus handleResult(const WrappedResult & wrapped_result);
+  void resetGoalState(bool active);
 
   rclcpp_action::Client<Surface>::SharedPtr action_client_;
+  std::mutex goal_mutex_;
+  GoalHandleSurface::SharedPtr goal_handle_;
+  WrappedResult wrapped_result_;
+  bool goal_active_{false};
+  bool goal_response_received_{false};
+  bool goal_rejected_{false};
+  bool result_received_{false};
+  bool cancel_requested_{false};
+  uint64_t active_goal_id_{0};
+  uint64_t next_goal_id_{0};
+  double active_goal_timeout_{30.0};
+  rclcpp::Time active_goal_start_time_;
 };
 
 class GoToPoseAction : public BT::StatefulActionNode
@@ -50,6 +68,7 @@ public:
     const BT::NodeConfiguration & config);
 
   static BT::PortsList providedPorts();
+  static const char * main_description();
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
