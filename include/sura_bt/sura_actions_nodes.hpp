@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <string>
 
 #include "rclcpp/rclcpp.hpp"
@@ -11,6 +12,7 @@
 #include "lifecycle_msgs/srv/change_state.hpp"
 #include "lifecycle_msgs/srv/get_state.hpp"
 #include "sura_actions/action/go_to_pose.hpp"
+#include "sura_actions/action/go_to_pose_usv.hpp"
 #include "sura_actions/action/surface.hpp"
 
 namespace sura_bt
@@ -54,7 +56,60 @@ private:
   rclcpp::Time active_goal_start_time_;
 };
 
-class GoToPoseAction : public BT::StatefulActionNode
+class GoToPoseSurfaceBackend : public BT::StatefulActionNode
+{
+public:
+  using GoToPoseUsv = sura_actions::action::GoToPoseUsv;
+  using GoalHandleGoToPoseUsv = rclcpp_action::ClientGoalHandle<GoToPoseUsv>;
+  using WrappedResult = GoalHandleGoToPoseUsv::WrappedResult;
+  using ChangeState = lifecycle_msgs::srv::ChangeState;
+  using GetState = lifecycle_msgs::srv::GetState;
+
+  GoToPoseSurfaceBackend(
+    const std::string & name,
+    const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts();
+  static const char * main_description();
+
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
+
+private:
+  std::string actionName(const BT::NodeConfiguration & config) const;
+  std::string lifecycleNodeName(const BT::NodeConfiguration & config) const;
+  bool prepareLifecycle(const rclcpp::Node::SharedPtr & ros_node, double timeout_sec);
+  bool getLifecycleState(
+    const rclcpp::Node::SharedPtr & ros_node,
+    const std::string & lifecycle_node,
+    uint8_t & state_id,
+    double timeout_sec);
+  bool changeLifecycleState(
+    const rclcpp::Node::SharedPtr & ros_node,
+    const std::string & lifecycle_node,
+    uint8_t transition_id,
+    double timeout_sec);
+  void stopLifecycle(const rclcpp::Node::SharedPtr & ros_node, double timeout_sec);
+  BT::NodeStatus handleResult(const WrappedResult & wrapped_result);
+  void resetGoalState(bool active);
+
+  rclcpp_action::Client<GoToPoseUsv>::SharedPtr action_client_;
+  std::mutex goal_mutex_;
+  GoalHandleGoToPoseUsv::SharedPtr goal_handle_;
+  WrappedResult wrapped_result_;
+  bool goal_active_{false};
+  bool goal_response_received_{false};
+  bool goal_rejected_{false};
+  bool result_received_{false};
+  bool cancel_requested_{false};
+  uint64_t active_goal_id_{0};
+  uint64_t next_goal_id_{0};
+  double active_goal_timeout_{120.0};
+  rclcpp::Time active_goal_start_time_;
+};
+
+class GoToPoseUnderwaterBackend : public BT::StatefulActionNode
 {
 public:
   using GoToPose = sura_actions::action::GoToPose;
@@ -63,7 +118,7 @@ public:
   using ChangeState = lifecycle_msgs::srv::ChangeState;
   using GetState = lifecycle_msgs::srv::GetState;
 
-  GoToPoseAction(
+  GoToPoseUnderwaterBackend(
     const std::string & name,
     const BT::NodeConfiguration & config);
 
@@ -109,6 +164,22 @@ private:
   uint64_t next_goal_id_{0};
   double active_goal_timeout_{120.0};
   rclcpp::Time active_goal_start_time_;
+};
+
+
+class GoToPoseAction : public BT::StatefulActionNode
+{
+public:
+  GoToPoseAction(const std::string & name, const BT::NodeConfiguration & config);
+  static BT::PortsList providedPorts();
+  static const char * main_description();
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
+
+private:
+  BT::NodeStatus tickBackend();
+  std::unique_ptr<BT::StatefulActionNode> backend_;
 };
 
 }  // namespace sura_bt

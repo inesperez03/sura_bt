@@ -1,0 +1,17 @@
+CMake Error at CMakeLists.txt:20 (find_package):
+  By not providing "Findsura_actions.cmake" in CMAKE_MODULE_PATH this project
+  has asked CMake to find a package configuration file provided by
+  "sura_actions", but CMake did not find one.
+
+  Could not find a package configuration file provided by "sura_actions" with
+  any of the following names:
+
+    sura_actionsConfig.cmake
+    sura_actions-config.cmake
+
+  Add the installation prefix of "sura_actions" to CMAKE_PREFIX_PATH or set
+  "sura_actions_DIR" to a directory containing one of the above files.  If
+  "sura_actions" provides a separate development package or SDK, be sure it
+  has been installed.
+
+

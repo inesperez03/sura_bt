@@ -1,0 +1,8 @@
+<root>
+  <BehaviorTree ID="AutonomousBranch">
+    <Sequence>
+      <SendVelocity name="first_move" robot_namespace="robot_a" linear_x="0.2"/>
+      <SurfaceAction name="surface" robot_namespace="robot_a"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

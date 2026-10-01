@@ -1,0 +1,7 @@
+<root>
+  <BehaviorTree ID="SafetyBranch">
+    <ReactiveParallel name="robots">
+      <RobotSafetyBranches/>
+    </ReactiveParallel>
+  </BehaviorTree>
+</root>

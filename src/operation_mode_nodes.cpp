@@ -1,8 +1,11 @@
 #include "sura_bt/operation_mode_nodes.hpp"
 
+#include "sura_bt/fleet_tree.hpp"
+
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 
 #include "rclcpp/rclcpp.hpp"
@@ -286,6 +289,107 @@ BT::NodeStatus VariableIsNot::tick()
   return matches ? BT::NodeStatus::FAILURE : BT::NodeStatus::SUCCESS;
 }
 
+ReactiveParallel::ReactiveParallel(
+  const std::string & name,
+  const BT::NodeConfiguration & config)
+: BT::ControlNode(name, config)
+{
+}
+
+BT::PortsList ReactiveParallel::providedPorts()
+{
+  return {};
+}
+
+const char * ReactiveParallel::main_description()
+{
+  return "Ticks every child on every cycle, including after a sibling succeeds.";
+}
+
+BT::NodeStatus ReactiveParallel::tick()
+{
+  bool any_running = false;
+  bool any_failure = false;
+  for (auto * child : children_nodes_)
+  {
+    const auto status = child->executeTick();
+    any_running |= status == BT::NodeStatus::RUNNING;
+    any_failure |= status == BT::NodeStatus::FAILURE;
+  }
+  std::string robot_namespaces;
+  if (config().blackboard->get("robot_namespaces", robot_namespaces))
+  {
+    std::string combined = "run";
+    for (const auto & robot : parseRobotNamespaces(robot_namespaces))
+    {
+      std::string request;
+      if (!config().blackboard->get("mission_control_" + robot, request))
+      {
+        throw BT::RuntimeError("No mission_control state for robot ", robot);
+      }
+      if (request == "abort")
+      {
+        combined = "abort";
+      }
+      else if (request == "ask" && combined != "abort")
+      {
+        combined = "ask";
+      }
+      else if (request == "pause" && combined != "abort" && combined != "ask")
+      {
+        combined = "pause";
+      }
+      else if (request != "run" && request != "pause" && request != "ask" &&
+        request != "abort")
+      {
+        throw BT::RuntimeError(
+          "Unknown mission_control state for robot ", robot, ": ", request);
+      }
+    }
+    config().blackboard->set("mission_control", combined);
+  }
+
+  if (any_failure)
+  {
+    haltChildren();
+    return BT::NodeStatus::FAILURE;
+  }
+  if (any_running)
+  {
+    return BT::NodeStatus::RUNNING;
+  }
+  haltChildren();
+  return BT::NodeStatus::SUCCESS;
+}
+
+MissionCheckpoint::MissionCheckpoint(
+  const std::string & name, const BT::NodeConfiguration & config)
+: BT::DecoratorNode(name, config)
+{
+}
+
+BT::PortsList MissionCheckpoint::providedPorts()
+{
+  return {BT::InputPort<std::string>("key", "Stable identity of an autonomous action.")};
+}
+
+const char * MissionCheckpoint::main_description()
+{
+  return "Remembers a completed autonomous action across an intervention reload.";
+}
+
+BT::NodeStatus MissionCheckpoint::tick()
+{
+  const auto key = getInput<std::string>("key");
+  if (!key || key->empty()) {throw BT::RuntimeError("MissionCheckpoint requires key");}
+  const auto completed = config().blackboard->get<std::shared_ptr<std::unordered_set<std::string>>>(
+    "mission_completed_actions");
+  if (completed->count(*key) != 0) {return BT::NodeStatus::SUCCESS;}
+  const auto result = child_node_->executeTick();
+  if (result == BT::NodeStatus::SUCCESS) {completed->insert(*key);}
+  return result;
+}
+
 MissionControl::MissionControl(
   const std::string & name,
   const BT::NodeConfiguration & config)
@@ -300,7 +404,7 @@ BT::PortsList MissionControl::providedPorts()
 
 const char * MissionControl::main_description()
 {
-  return "Runs mission children while honoring pause and abort mission control states.";
+  return "Runs mission children through recoverable safety errors and stops on abort.";
 }
 
 void MissionControl::halt()
@@ -323,12 +427,9 @@ BT::NodeStatus MissionControl::tick()
   std::string mission_control;
   if (config().blackboard->get("mission_control", mission_control))
   {
-    if (mission_control == "pause")
+    if (mission_control == "ask")
     {
-      if (current_child_idx_ < children_nodes_.size())
-      {
-        haltChild(current_child_idx_);
-      }
+      haltChildren();
       return BT::NodeStatus::RUNNING;
     }
 

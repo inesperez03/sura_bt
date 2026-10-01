@@ -199,6 +199,7 @@ void setTimeout(
 BT::PortsList activateControllerPorts()
 {
   return {
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace whose controllers are changed."),
     BT::InputPort<std::string>(
       "controllers",
       "Comma-separated controller names to activate for the requested behavior.")
@@ -208,21 +209,31 @@ BT::PortsList activateControllerPorts()
 BT::PortsList deactivateControllerPorts()
 {
   return {
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace whose controllers are changed."),
     BT::InputPort<std::string>(
       "controllers",
       "Comma-separated controller names to deactivate, or 'all' for every switchable controller."),
     BT::InputPort<double>(
       "cooldown_sec",
+      0.0,
       "Minimum time between repeated deactivation requests, in seconds.")
   };
 }
 
+std::string requiredRobotNamespace(const BT::TreeNode & node)
+{
+  const auto robot_namespace = node.getInput<std::string>("robot_namespace");
+  if (!robot_namespace || stripSlashes(robot_namespace.value()).empty())
+  {
+    throw BT::RuntimeError(node.name(), " requires a non-empty robot_namespace input");
+  }
+  return stripSlashes(robot_namespace.value());
+}
+
 std::string namespacedSystemName(
-  const BT::NodeConfiguration & config,
+  const std::string & robot_namespace,
   const std::string & system)
 {
-  const auto robot_namespace =
-    stripSlashes(config.blackboard->get<std::string>("robot_namespace"));
   const auto normalized_system = stripSlashes(system);
 
   if (normalized_system.empty())
@@ -347,10 +358,8 @@ std::vector<std::string> ControllerSwitchBase::getSwitchableControllers(
 }
 
 std::string ControllerSwitchBase::switchControllerServiceName(
-  const BT::NodeConfiguration & config)
+  const std::string & robot_namespace)
 {
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
   const auto normalized_namespace = stripSlashes(robot_namespace);
 
   if (normalized_namespace.empty())
@@ -362,10 +371,8 @@ std::string ControllerSwitchBase::switchControllerServiceName(
 }
 
 std::string ControllerSwitchBase::hardwareComponentServiceName(
-  const BT::NodeConfiguration & config)
+  const std::string & robot_namespace)
 {
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
   const auto normalized_namespace = stripSlashes(robot_namespace);
 
   if (normalized_namespace.empty())
@@ -378,10 +385,8 @@ std::string ControllerSwitchBase::hardwareComponentServiceName(
 }
 
 std::string ControllerSwitchBase::controllerInterlockServiceName(
-  const BT::NodeConfiguration & config)
+  const std::string & robot_namespace)
 {
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
   const auto normalized_namespace = stripSlashes(robot_namespace);
 
   if (normalized_namespace.empty())
@@ -398,7 +403,7 @@ ActivateControllers::ActivateControllers(
 : BT::SyncActionNode(name, config)
 {
   switch_client_ = getRosNode(config)->create_client<SwitchController>(
-    switchControllerServiceName(config));
+    switchControllerServiceName(requiredRobotNamespace(*this)));
 }
 
 BT::PortsList ActivateControllers::providedPorts()
@@ -408,7 +413,8 @@ BT::PortsList ActivateControllers::providedPorts()
 
 const char * ActivateControllers::main_description()
 {
-  return "Activates the requested set of controllers.";
+  return "Compatibilidad: cualquier plataforma con el servicio namespaced de ros2_control y "
+    "los controladores solicitados configurados; sus nombres disponibles dependen del robot.";
 }
 
 BT::NodeStatus ActivateControllers::tick()
@@ -473,7 +479,7 @@ DeactivateControllers::DeactivateControllers(
 : BT::SyncActionNode(name, config)
 {
   switch_client_ = getRosNode(config)->create_client<SwitchController>(
-    switchControllerServiceName(config));
+    switchControllerServiceName(requiredRobotNamespace(*this)));
 }
 
 BT::PortsList DeactivateControllers::providedPorts()
@@ -483,7 +489,8 @@ BT::PortsList DeactivateControllers::providedPorts()
 
 const char * DeactivateControllers::main_description()
 {
-  return "Deactivates the requested set of controllers.";
+  return "Compatibilidad: cualquier plataforma con el servicio namespaced de ros2_control y "
+    "los controladores solicitados configurados; sus nombres disponibles dependen del robot.";
 }
 
 BT::NodeStatus DeactivateControllers::tick()
@@ -548,24 +555,27 @@ DeactivateSystem::DeactivateSystem(
 : BT::SyncActionNode(name, config)
 {
   hardware_client_ = getRosNode(config)->create_client<SetHardwareComponentState>(
-    hardwareComponentServiceName(config));
+    hardwareComponentServiceName(requiredRobotNamespace(*this)));
 }
 
 BT::PortsList DeactivateSystem::providedPorts()
 {
   return {
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace whose hardware system is changed."),
     BT::InputPort<std::string>(
       "system",
       "Hardware system or component to deactivate."),
     BT::InputPort<double>(
       "cooldown_sec",
+      5.0,
       "Minimum time between repeated deactivation requests for the same system, in seconds.")
   };
 }
 
 const char * DeactivateSystem::main_description()
 {
-  return "Deactivates a requested hardware system or component.";
+  return "Compatibilidad: cualquier plataforma que exponga el servicio namespaced de gestión "
+    "de hardware; los sistemas/componentes válidos dependen de su configuración.";
 }
 
 BT::NodeStatus DeactivateSystem::tick()
@@ -584,7 +594,7 @@ BT::NodeStatus DeactivateSystem::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  const std::string component_name = namespacedSystemName(config(), system.value());
+  const std::string component_name = namespacedSystemName(requiredRobotNamespace(*this), system.value());
   if (component_name.empty())
   {
     RCLCPP_ERROR(
@@ -659,12 +669,13 @@ SetControllerInterlock::SetControllerInterlock(
 : BT::SyncActionNode(name, config)
 {
   interlock_client_ = getRosNode(config)->create_client<ControllerInterlock>(
-    controllerInterlockServiceName(config));
+    controllerInterlockServiceName(requiredRobotNamespace(*this)));
 }
 
 BT::PortsList SetControllerInterlock::providedPorts()
 {
   return {
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace whose interlock is changed."),
     BT::InputPort<bool>(
       "enabled",
       "Whether the controller interlock should be enabled."),
@@ -673,13 +684,15 @@ BT::PortsList SetControllerInterlock::providedPorts()
       "Mission-level reason for changing the controller interlock state."),
     BT::InputPort<std::string>(
       "controllers",
+      std::string{},
       "Comma-separated controller names affected when the interlock is enabled.")
   };
 }
 
 const char * SetControllerInterlock::main_description()
 {
-  return "Enables or disables a controller interlock for selected controllers.";
+  return "Compatibilidad: plataformas cuyo gestor de control exponga el servicio de interlock; "
+    "los controladores seleccionados deben existir en esa configuración.";
 }
 
 BT::NodeStatus SetControllerInterlock::tick()

@@ -24,6 +24,29 @@ rclcpp::Node::SharedPtr getRosNode(const BT::NodeConfiguration & config)
   return config.blackboard->get<rclcpp::Node::SharedPtr>("ros_node");
 }
 
+std::string stripSlashes(std::string value)
+{
+  while (!value.empty() && value.front() == '/') { value.erase(value.begin()); }
+  while (!value.empty() && value.back() == '/') { value.pop_back(); }
+  return value;
+}
+
+std::string requiredRobotNamespace(const BT::TreeNode & node)
+{
+  const auto robot_namespace = node.getInput<std::string>("robot_namespace");
+  if (!robot_namespace || stripSlashes(robot_namespace.value()).empty())
+  {
+    throw BT::RuntimeError(node.name(), " requires a non-empty robot_namespace input");
+  }
+  return stripSlashes(robot_namespace.value());
+}
+
+std::string namespacedTopic(const std::string & robot_namespace, const std::string & topic)
+{
+  if (!topic.empty() && topic.front() == '/') { return topic; }
+  return "/" + robot_namespace + "/" + stripSlashes(topic);
+}
+
 constexpr double PHOTO_TIMEOUT_SEC = 2.0;
 constexpr const char * PHOTO_OUTPUT_DIR = "photos";
 constexpr const char * PHOTO_FILENAME_PREFIX = "photo";
@@ -140,13 +163,15 @@ TakePhoto::TakePhoto(
 BT::PortsList TakePhoto::providedPorts()
 {
   return {
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace whose camera is used."),
     BT::InputPort<std::string>("topic", "Image topic to capture from.")
   };
 }
 
 const char * TakePhoto::main_description()
 {
-  return "Captures an image from a camera topic and saves it to disk as PNG.";
+  return "Compatibilidad: cualquier plataforma con una cámara que publique el topic de imagen "
+    "indicado (resuelto dentro de robot_namespace). Guarda la captura como PNG.";
 }
 
 BT::NodeStatus TakePhoto::tick()
@@ -161,6 +186,7 @@ BT::NodeStatus TakePhoto::tick()
       "[sura_bt] TakePhoto requires non-empty topic input");
     return BT::NodeStatus::FAILURE;
   }
+  const auto resolved_topic = namespacedTopic(requiredRobotNamespace(*this), topic.value());
 
   std::shared_ptr<ImageMsg> captured_image;
   auto callback_group = ros_node->create_callback_group(
@@ -168,7 +194,7 @@ BT::NodeStatus TakePhoto::tick()
   rclcpp::SubscriptionOptions subscription_options;
   subscription_options.callback_group = callback_group;
   auto image_sub = ros_node->create_subscription<ImageMsg>(
-    topic.value(),
+    resolved_topic,
     rclcpp::SensorDataQoS(),
     [this, &captured_image](const ImageMsg::SharedPtr msg)
     {
@@ -203,7 +229,7 @@ BT::NodeStatus TakePhoto::tick()
       ros_node->get_logger(),
       "[sura_bt] TakePhoto timed out waiting %.3fs for image topic %s",
       PHOTO_TIMEOUT_SEC,
-      topic.value().c_str());
+      resolved_topic.c_str());
     return BT::NodeStatus::FAILURE;
   }
 
@@ -224,7 +250,7 @@ BT::NodeStatus TakePhoto::tick()
   RCLCPP_INFO(
     ros_node->get_logger(),
     "[sura_bt] Action: take photo. topic=%s path=%s",
-    topic.value().c_str(),
+    resolved_topic.c_str(),
     path.c_str());
 
   return BT::NodeStatus::SUCCESS;

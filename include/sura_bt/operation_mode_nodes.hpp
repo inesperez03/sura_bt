@@ -5,6 +5,7 @@
 #include "behaviortree_cpp_v3/condition_node.h"
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/control_node.h"
+#include "behaviortree_cpp_v3/decorator_node.h"
 
 namespace sura_bt
 {
@@ -74,6 +75,29 @@ public:
   static BT::PortsList providedPorts();
   static const char * main_description();
 
+  BT::NodeStatus tick() override;
+};
+
+class ReactiveParallel : public BT::ControlNode
+{
+public:
+  ReactiveParallel(
+    const std::string & name,
+    const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts();
+  static const char * main_description();
+
+private:
+  BT::NodeStatus tick() override;
+};
+
+class MissionCheckpoint : public BT::DecoratorNode
+{
+public:
+  MissionCheckpoint(const std::string & name, const BT::NodeConfiguration & config);
+  static BT::PortsList providedPorts();
+  static const char * main_description();
   BT::NodeStatus tick() override;
 };
 

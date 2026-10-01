@@ -56,6 +56,7 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   registerNodeWithDescription<GoToPoseAction>(
     factory, "GoToPoseAction");
 
+
   registerNodeWithDescription<TeleopRequested>(
     factory, "TeleopRequested");
 
@@ -70,6 +71,12 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
 
   registerNodeWithDescription<VariableIsNot>(
     factory, "VariableIsNot");
+
+  registerNodeWithDescription<ReactiveParallel>(
+    factory, "ReactiveParallel");
+
+  registerNodeWithDescription<MissionCheckpoint>(
+    factory, "MissionCheckpoint");
 
   registerNodeWithDescription<MissionControl>(
     factory, "MissionControl");

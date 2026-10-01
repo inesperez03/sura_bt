@@ -1,0 +1,59 @@
+[0.009s] Invoking command in '/home/usuario/sura_ws_meta/src/sura_bt/build/sura_bt': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/usuario/sura_ws_meta/src/sura_bt -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/usuario/sura_ws_meta/src/sura_bt/install/sura_bt
+[0.088s] -- The C compiler identification is GNU 12.3.0
+[0.154s] -- The CXX compiler identification is GNU 12.3.0
+[0.166s] -- Detecting C compiler ABI info
+[0.226s] -- Detecting C compiler ABI info - done
+[0.232s] -- Check for working C compiler: /usr/lib/ccache/cc - skipped
+[0.232s] -- Detecting C compile features
+[0.233s] -- Detecting C compile features - done
+[0.235s] -- Detecting CXX compiler ABI info
+[0.311s] -- Detecting CXX compiler ABI info - done
+[0.317s] -- Check for working CXX compiler: /usr/lib/ccache/c++ - skipped
+[0.317s] -- Detecting CXX compile features
+[0.317s] -- Detecting CXX compile features - done
+[0.322s] -- Found ament_cmake: 1.3.12 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.685s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.747s] -- Override CMake install command with custom implementation using symlinks instead of copying resources
+[0.774s] -- Found rclcpp: 16.0.17 (/opt/ros/humble/share/rclcpp/cmake)
+[0.814s] -- Found rosidl_generator_c: 3.1.8 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+[0.818s] -- Found rosidl_adapter: 3.1.8 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[0.826s] -- Found rosidl_generator_cpp: 3.1.8 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+[0.836s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.851s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.888s] -- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)
+[0.890s] -- Found rmw_fastrtps_cpp: 6.2.9 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)
+[0.984s] -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.2")  
+[1.023s] -- Found FastRTPS: /opt/ros/humble/include  
+[1.079s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[1.088s] -- Looking for pthread.h
+[1.199s] -- Looking for pthread.h - found
+[1.200s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+[1.303s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+[1.304s] -- Found Threads: TRUE  
+[1.348s] -- Found rclcpp_action: 16.0.17 (/opt/ros/humble/share/rclcpp_action/cmake)
+[1.379s] -- Found std_srvs: 4.9.0 (/opt/ros/humble/share/std_srvs/cmake)
+[1.387s] -- Found sensor_msgs: 4.9.0 (/opt/ros/humble/share/sensor_msgs/cmake)
+[1.413s] -- Found diagnostic_msgs: 4.9.0 (/opt/ros/humble/share/diagnostic_msgs/cmake)
+[1.425s] -- Found cv_bridge: 3.2.1 (/opt/ros/humble/share/cv_bridge/cmake)
+[1.435s] -- Found lifecycle_msgs: 1.2.2 (/opt/ros/humble/share/lifecycle_msgs/cmake)
+[1.445s] -- Found controller_manager_msgs: 2.53.1 (/opt/ros/humble/share/controller_manager_msgs/cmake)
+[1.466s] CMake Error at CMakeLists.txt:20 (find_package):
+[1.466s]   By not providing "Findsura_actions.cmake" in CMAKE_MODULE_PATH this project
+[1.466s]   has asked CMake to find a package configuration file provided by
+[1.466s]   "sura_actions", but CMake did not find one.
+[1.466s] 
+[1.466s]   Could not find a package configuration file provided by "sura_actions" with
+[1.466s]   any of the following names:
+[1.467s] 
+[1.467s]     sura_actionsConfig.cmake
+[1.467s]     sura_actions-config.cmake
+[1.467s] 
+[1.467s]   Add the installation prefix of "sura_actions" to CMAKE_PREFIX_PATH or set
+[1.467s]   "sura_actions_DIR" to a directory containing one of the above files.  If
+[1.467s]   "sura_actions" provides a separate development package or SDK, be sure it
+[1.467s]   has been installed.
+[1.467s] 
+[1.467s] 
+[1.467s] -- Configuring incomplete, errors occurred!
+[1.467s] See also "/home/usuario/sura_ws_meta/src/sura_bt/build/sura_bt/CMakeFiles/CMakeOutput.log".
+[1.481s] Invoked command in '/home/usuario/sura_ws_meta/src/sura_bt/build/sura_bt' returned '1': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/usuario/sura_ws_meta/src/sura_bt -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/usuario/sura_ws_meta/src/sura_bt/install/sura_bt

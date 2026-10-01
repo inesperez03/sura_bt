@@ -8,7 +8,7 @@
           key="mission_state"
           value="paused"
         />
-        <DeactivateControllers controllers="all"/>
+        <DeactivateControllers robot_namespace="{robot_namespace}" controllers="all"/>
         <AlwaysSuccess name="mission_already_paused"/>
       </IfThenElse>
 

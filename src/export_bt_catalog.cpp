@@ -56,6 +56,12 @@ nlohmann::json portToJson(
   port_json["direction"] = portDirectionName(port.direction());
   port_json["type"] = BT::demangle(port.type());
   port_json["description"] = port.description();
+  const bool accepts_input =
+    port.direction() == BT::PortDirection::INPUT || port.direction() == BT::PortDirection::INOUT;
+  port_json["required"] = accepts_input && port.defaultValue().empty();
+  if (!port.defaultValue().empty()) {
+    port_json["default"] = port.defaultValue();
+  }
   return port_json;
 }
 
@@ -100,13 +106,23 @@ nlohmann::json buildCatalogJson(const BT::BehaviorTreeFactory & factory)
   for (const auto & node_id : node_ids)
   {
     const bool builtin = factory.builtinNodes().count(node_id) > 0;
-    if (builtin)
+    if (builtin || node_id == "MissionCheckpoint")
     {
       continue;
     }
 
     catalog["nodes"][node_id] =
       manifestToJson(factory.manifests().at(node_id));
+    if (node_id == "GoToPoseAction") {
+      auto & z_port = catalog["nodes"][node_id]["ports"]["z"];
+      z_port["required"] = false;
+      z_port["required_for_family"] = {"underwater"};
+    }
+    if (node_id == "SetControllerInterlock") {
+      auto & controllers = catalog["nodes"][node_id]["ports"]["controllers"];
+      controllers["required"] = false;
+      controllers["required_when"] = {{"enabled", "true"}};
+    }
   }
 
   return catalog;

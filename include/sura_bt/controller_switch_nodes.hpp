@@ -28,14 +28,11 @@ protected:
   static std::vector<std::string> getSwitchableControllers(
     const BT::NodeConfiguration & config);
 
-  static std::string switchControllerServiceName(
-    const BT::NodeConfiguration & config);
+  static std::string switchControllerServiceName(const std::string & robot_namespace);
 
-  static std::string hardwareComponentServiceName(
-    const BT::NodeConfiguration & config);
+  static std::string hardwareComponentServiceName(const std::string & robot_namespace);
 
-  static std::string controllerInterlockServiceName(
-    const BT::NodeConfiguration & config);
+  static std::string controllerInterlockServiceName(const std::string & robot_namespace);
 };
 
 class ActivateControllers : public BT::SyncActionNode, protected ControllerSwitchBase

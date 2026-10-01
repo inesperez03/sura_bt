@@ -2,8 +2,9 @@
   <BehaviorTree ID="AutonomousBranch">
     <MissionControl name="mission_control">
       <VariableSet name="mission_running" key="mission_state" value="running"/>
-      <GoToPoseAction name="go_to_target" frame_id="world" holonomic="true" timeout="60.0" x="1.0" y="2.0" yaw="0.0" z="1.0"/>
-      <TakePhoto name="take_photo" topic="/bluerov/stonefish/down_camera/image_color"/>
+      <Sequence name="autonomous_mission_sequence">
+        <SurfaceAction name="surface_action" robot_namespace="bluerov"/>
+      </Sequence>
       <VariableSet name="set_mission_completed" key="mission_state" value="completed"/>
       <MissionCompleted name="mission_completed"/>
     </MissionControl>

@@ -70,6 +70,16 @@ std::shared_ptr<sura_safety::DiagnosticsMonitor> getMonitor(
     "diagnostics_monitor");
 }
 
+std::string requiredRobotNamespace(const BT::TreeNode & node)
+{
+  const auto robot_namespace = node.getInput<std::string>("robot_namespace");
+  if (!robot_namespace || stripSlashes(robot_namespace.value()).empty())
+  {
+    throw BT::RuntimeError(node.name(), " requires a non-empty robot_namespace input");
+  }
+  return stripSlashes(robot_namespace.value());
+}
+
 }  // namespace
 
 SendWrench::SendWrench(
@@ -78,8 +88,7 @@ SendWrench::SendWrench(
 : BT::SyncActionNode(name, config)
 {
   const auto ros_node = getRosNode(config);
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
+  const auto robot_namespace = requiredRobotNamespace(*this);
 
   wrench_pub_ = ros_node->create_publisher<WrenchCommand>(
     namespacedTopic(robot_namespace, "controller/arbitrator/wrench"),
@@ -89,20 +98,23 @@ SendWrench::SendWrench(
 BT::PortsList SendWrench::providedPorts()
 {
   return {
-    BT::InputPort<double>("force_x", "Body-frame force command along the X axis."),
-    BT::InputPort<double>("torque_x", "Body-frame torque command around the X axis."),
-    BT::InputPort<double>("force_y", "Body-frame force command along the Y axis."),
-    BT::InputPort<double>("torque_y", "Body-frame torque command around the Y axis."),
-    BT::InputPort<double>("force_z", "Body-frame force command along the Z axis."),
-    BT::InputPort<double>("torque_z", "Body-frame torque command around the Z axis."),
-    BT::InputPort<int>("priority", "Priority of the wrench command from 1 to 100."),
-    BT::InputPort<std::string>("reason", "Mission-level reason for sending this wrench command.")
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace that receives the command."),
+    BT::InputPort<double>("force_x", 0.0, "Body-frame force command along the X axis." ),
+    BT::InputPort<double>("torque_x", 0.0, "Body-frame torque command around the X axis." ),
+    BT::InputPort<double>("force_y", 0.0, "Body-frame force command along the Y axis." ),
+    BT::InputPort<double>("torque_y", 0.0, "Body-frame torque command around the Y axis." ),
+    BT::InputPort<double>("force_z", 0.0, "Body-frame force command along the Z axis." ),
+    BT::InputPort<double>("torque_z", 0.0, "Body-frame torque command around the Z axis." ),
+    BT::InputPort<int>("priority", 85, "Priority of the wrench command from 1 to 100." ),
+    BT::InputPort<std::string>("reason", std::string("unknown"), "Mission-level reason for sending this wrench command." )
   };
 }
 
 const char * SendWrench::main_description()
 {
-  return "Publishes a body-frame wrench command for the underwater vehicle.";
+  return "Compatibilidad: vehículos de superficie y submarinos si su configuración expone "
+    "el controlador body_force. Publica un wrench en el marco del cuerpo; activa body_force "
+    "con ActivateControllers antes de usarlo.";
 }
 
 BT::NodeStatus SendWrench::tick()
@@ -193,8 +205,7 @@ SendVelocity::SendVelocity(
 : BT::SyncActionNode(name, config)
 {
   const auto ros_node = getRosNode(config);
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
+  const auto robot_namespace = requiredRobotNamespace(*this);
 
   velocity_pub_ = ros_node->create_publisher<VelocityCommand>(
     namespacedTopic(robot_namespace, "controller/arbitrator/velocity"),
@@ -204,20 +215,23 @@ SendVelocity::SendVelocity(
 BT::PortsList SendVelocity::providedPorts()
 {
   return {
-    BT::InputPort<double>("linear_x", "Body-frame linear velocity command along the X axis."),
-    BT::InputPort<double>("angular_x", "Body-frame angular velocity command around the X axis."),
-    BT::InputPort<double>("linear_y", "Body-frame linear velocity command along the Y axis."),
-    BT::InputPort<double>("angular_y", "Body-frame angular velocity command around the Y axis."),
-    BT::InputPort<double>("linear_z", "Body-frame linear velocity command along the Z axis."),
-    BT::InputPort<double>("angular_z", "Body-frame angular velocity command around the Z axis."),
-    BT::InputPort<int>("priority", "Priority of the velocity command from 1 to 100."),
-    BT::InputPort<std::string>("reason", "Mission-level reason for sending this velocity command.")
+    BT::InputPort<std::string>("robot_namespace", "Robot namespace that receives the command."),
+    BT::InputPort<double>("linear_x", 0.0, "Body-frame linear velocity command along the X axis." ),
+    BT::InputPort<double>("angular_x", 0.0, "Body-frame angular velocity command around the X axis." ),
+    BT::InputPort<double>("linear_y", 0.0, "Body-frame linear velocity command along the Y axis." ),
+    BT::InputPort<double>("angular_y", 0.0, "Body-frame angular velocity command around the Y axis." ),
+    BT::InputPort<double>("linear_z", 0.0, "Body-frame linear velocity command along the Z axis." ),
+    BT::InputPort<double>("angular_z", 0.0, "Body-frame angular velocity command around the Z axis." ),
+    BT::InputPort<int>("priority", 85, "Priority of the velocity command from 1 to 100."),
+    BT::InputPort<std::string>("reason", std::string("unknown"), "Mission-level reason for sending this velocity command." )
   };
 }
 
 const char * SendVelocity::main_description()
 {
-  return "Publishes a body-frame velocity command for the underwater vehicle.";
+  return "Compatibilidad: vehículos de superficie y submarinos si su configuración expone "
+    "el controlador body_velocity. Publica una velocidad en el marco del cuerpo; activa "
+    "body_velocity con ActivateControllers antes de usarlo.";
 }
 
 BT::NodeStatus SendVelocity::tick()
@@ -308,8 +322,7 @@ ComputeAreaRecoveryForce::ComputeAreaRecoveryForce(
 : BT::SyncActionNode(name, config)
 {
   const auto ros_node = getRosNode(config);
-  const auto robot_namespace =
-    config.blackboard->get<std::string>("robot_namespace");
+  const auto robot_namespace = getInput<std::string>("namespace").value();
 
   navigator_sub_ = ros_node->create_subscription<Navigator>(
     namespacedTopic(robot_namespace, "navigator/navigation"),
@@ -320,17 +333,21 @@ ComputeAreaRecoveryForce::ComputeAreaRecoveryForce(
 BT::PortsList ComputeAreaRecoveryForce::providedPorts()
 {
   return {
-    BT::InputPort<double>("force", "Magnitude of the recovery force to direct the vehicle back inside the allowed area."),
-    BT::InputPort<std::string>("diagnostic_name", "Full diagnostic entry used to determine the area limit violation."),
-    BT::InputPort<std::string>("diagnostic_suffix", "Diagnostic suffix used to locate the area limit diagnostic when no full name is provided."),
+    BT::InputPort<std::string>("namespace", "Robot namespace, usually mapped from {robot_namespace}."),
+    BT::InputPort<double>("force", 40.0, "Magnitude of the recovery force to direct the vehicle back inside the allowed area."),
+    BT::InputPort<bool>("surface_vehicle", false, "Use differential-thrust heading recovery for a surface vehicle."),
+    BT::InputPort<std::string>("diagnostic_name", "Source identity, relative to the robot or absolute, for the area limit diagnostic."),
     BT::OutputPort<double>("output_x", "Computed body-frame force along the X axis."),
-    BT::OutputPort<double>("output_y", "Computed body-frame force along the Y axis.")
+    BT::OutputPort<double>("output_y", "Computed body-frame force along the Y axis."),
+    BT::OutputPort<double>("output_torque_z", "Computed body-frame yaw torque for surface recovery.")
   };
 }
 
 const char * ComputeAreaRecoveryForce::main_description()
 {
-  return "Computes a recovery force that drives the vehicle back inside the allowed operation area.";
+  return "Compatibilidad: vehículos de superficie y submarinos con datos de navegación. "
+    "Configura surface_vehicle=true solo para vehículos de superficie con propulsión diferencial; "
+    "déjalo en false para la recuperación submarina.";
 }
 
 void ComputeAreaRecoveryForce::navigatorCallback(const Navigator::SharedPtr msg)
@@ -343,28 +360,33 @@ BT::NodeStatus ComputeAreaRecoveryForce::tick()
 {
   const auto monitor = getMonitor(config());
   auto diagnostic_name = getInput<std::string>("diagnostic_name");
-  if (!diagnostic_name)
+  if (!diagnostic_name || diagnostic_name.value().empty())
   {
-    auto diagnostic_suffix = getInput<std::string>("diagnostic_suffix");
-    if (!diagnostic_suffix)
-    {
-      diagnostic_suffix = "AreaLimit";
-    }
-
-    const std::string diagnostic_prefix =
-      config().blackboard->get<std::string>("diagnostic_prefix");
-    diagnostic_name =
-      diagnostic_prefix + "/Navigation/ Navigation " + diagnostic_suffix.value();
+    throw BT::RuntimeError("ComputeAreaRecoveryForce requires diagnostic_name");
+  }
+  const auto status = monitor->getStatus(diagnostic_name.value());
+  if (!status || status->level == diagnostic_msgs::msg::DiagnosticStatus::STALE)
+  {
+    return BT::NodeStatus::FAILURE;
   }
 
+  // Read all coordinates from the same diagnostic snapshot.
+  const auto value = [&status](const std::string & key) -> std::string {
+    for (const auto & item : status->values)
+    {
+      if (item.key == key) { return item.value; }
+    }
+    return "";
+  };
+
   const auto current_x = parseDouble(
-    monitor->getValue(diagnostic_name.value(), "current_x"));
+    value("current_x"));
   const auto current_y = parseDouble(
-    monitor->getValue(diagnostic_name.value(), "current_y"));
+    value("current_y"));
   const auto center_x = parseDouble(
-    monitor->getValue(diagnostic_name.value(), "center_x"));
+    value("center_x"));
   const auto center_y = parseDouble(
-    monitor->getValue(diagnostic_name.value(), "center_y"));
+    value("center_y"));
 
   if (!current_x || !current_y || !center_x || !center_y)
   {
@@ -381,13 +403,13 @@ BT::NodeStatus ComputeAreaRecoveryForce::tick()
   double target_x = center_x.value();
   double target_y = center_y.value();
 
-  const auto shape = monitor->getValue(diagnostic_name.value(), "shape");
+  const auto shape = value("shape");
   if (shape == "rectangle" || shape == "rect")
   {
     const auto width = parseDouble(
-      monitor->getValue(diagnostic_name.value(), "width"));
+      value("width"));
     const auto height = parseDouble(
-      monitor->getValue(diagnostic_name.value(), "height"));
+      value("height"));
 
     if (width && height)
     {
@@ -413,6 +435,7 @@ BT::NodeStatus ComputeAreaRecoveryForce::tick()
   {
     setOutput("output_x", 0.0);
     setOutput("output_y", 0.0);
+    setOutput("output_torque_z", 0.0);
     return BT::NodeStatus::SUCCESS;
   }
 
@@ -431,6 +454,26 @@ BT::NodeStatus ComputeAreaRecoveryForce::tick()
   const double unit_world_x = world_x / norm;
   const double unit_world_y = world_y / norm;
 
+  const auto surface_vehicle = getInput<bool>("surface_vehicle");
+  if (surface_vehicle && surface_vehicle.value())
+  {
+    const double target_heading = std::atan2(unit_world_y, unit_world_x);
+    const double heading_error = std::atan2(
+      std::sin(target_heading - yaw), std::cos(target_heading - yaw));
+    constexpr double heading_tolerance = 0.25;
+    constexpr double torque_gain = 20.0;
+    constexpr double max_yaw_torque = 12.0;
+
+    const bool heading_aligned = std::abs(heading_error) <= heading_tolerance;
+    const double forward_force = heading_aligned ? force : 0.0;
+    const double yaw_torque = heading_aligned ? 0.0 : std::clamp(
+      torque_gain * heading_error, -max_yaw_torque, max_yaw_torque);
+    setOutput("output_x", forward_force);
+    setOutput("output_y", 0.0);
+    setOutput("output_torque_z", yaw_torque);
+    return BT::NodeStatus::SUCCESS;
+  }
+
   const double body_force_x =
     force * (std::cos(yaw) * unit_world_x + std::sin(yaw) * unit_world_y);
   const double body_force_y =
@@ -438,6 +481,7 @@ BT::NodeStatus ComputeAreaRecoveryForce::tick()
 
   setOutput("output_x", body_force_x);
   setOutput("output_y", body_force_y);
+  setOutput("output_torque_z", 0.0);
   return BT::NodeStatus::SUCCESS;
 }
 

@@ -1,0 +1,2 @@
+Invoking command in '/home/usuario/sura_ws_meta/src/sura_bt/build/sura_bt': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/usuario/sura_ws_meta/src/sura_bt -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/usuario/sura_ws_meta/src/sura_bt/install/sura_bt
+Invoked command in '/home/usuario/sura_ws_meta/src/sura_bt/build/sura_bt' returned '1': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/usuario/sura_ws_meta/src/sura_bt -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/usuario/sura_ws_meta/src/sura_bt/install/sura_bt
