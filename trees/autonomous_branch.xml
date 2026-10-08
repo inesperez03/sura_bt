@@ -2,8 +2,13 @@
   <BehaviorTree ID="AutonomousBranch">
     <MissionControl name="mission_control">
       <VariableSet name="mission_running" key="mission_state" value="running"/>
-      <Sequence name="autonomous_mission_sequence">
-        <SurfaceAction name="surface_action" robot_namespace="bluerov"/>
+      <Sequence name="force_movement_sequence">
+        <ActivateControllers name="activate_body_force" controllers="body_force" robot_namespace="bluerov"/>
+        <SendWrench name="send_negative_sway_force" force_y="-20.0" robot_namespace="bluerov" reason="Operator requested 20 newtons of force along negative sway axis"/>
+        <Delay name="force_duration" delay_msec="3000">
+          <AlwaysSuccess name="success"/>
+        </Delay>
+        <DeactivateControllers name="deactivate_body_force" controllers="body_force" robot_namespace="bluerov"/>
       </Sequence>
       <VariableSet name="set_mission_completed" key="mission_state" value="completed"/>
       <MissionCompleted name="mission_completed"/>

@@ -4,19 +4,26 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <thread>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
+#include <cstdarg>
+#include <cstdio>
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rcutils/logging.h"
 #include "std_srvs/srv/trigger.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -30,11 +37,60 @@
 #include "tinyxml2.h"
 
 #include "sura_bt/fleet_tree.hpp"
+#include "sura_bt/mission_failure_reasons.hpp"
 #include "sura_bt/safety_ask_coordinator.hpp"
 #include "sura_bt/register_nodes.hpp"
 #include "sura_safety/safety_blackboard.hpp"
 #include "sura_safety/diagnostics_monitor.hpp"
 #include "sura_safety/safety_ask_state.hpp"
+#include "sura_safety/critical_safety_state.hpp"
+
+namespace
+{
+std::mutex mission_error_log_mutex;
+std::string latest_mission_error_log;
+std::chrono::steady_clock::time_point latest_mission_error_time;
+rcutils_logging_output_handler_t previous_logging_handler = nullptr;
+
+void missionLoggingOutputHandler(
+  const rcutils_log_location_t * location, int severity, const char * name,
+  rcutils_time_point_value_t timestamp, const char * format, va_list * args)
+{
+  if (previous_logging_handler) {
+    previous_logging_handler(location, severity, name, timestamp, format, args);
+  }
+  if (severity < RCUTILS_LOG_SEVERITY_ERROR || !format || !args) {return;}
+
+  char buffer[4096]{};
+  va_list copy;
+  va_copy(copy, *args);
+  const int length = std::vsnprintf(buffer, sizeof(buffer), format, copy);
+  va_end(copy);
+  if (length <= 0) {return;}
+
+  std::lock_guard<std::mutex> lock(mission_error_log_mutex);
+  latest_mission_error_log.assign(buffer, std::min<std::size_t>(length, sizeof(buffer) - 1));
+  latest_mission_error_time = std::chrono::steady_clock::now();
+}
+
+void clearMissionErrorLog()
+{
+  std::lock_guard<std::mutex> lock(mission_error_log_mutex);
+  latest_mission_error_log.clear();
+}
+
+std::string takeRecentMissionErrorLog()
+{
+  std::lock_guard<std::mutex> lock(mission_error_log_mutex);
+  if (latest_mission_error_log.empty() ||
+    std::chrono::steady_clock::now() - latest_mission_error_time > std::chrono::seconds(5))
+  {
+    latest_mission_error_log.clear();
+    return {};
+  }
+  return latest_mission_error_log;
+}
+}  // namespace
 
 static std::string getArgumentValue(
   int argc,
@@ -73,6 +129,46 @@ static bool isBroadcasterController(
   }
 
   return type.find("Broadcaster") != std::string::npos;
+}
+
+static std::string missionFailureMessage(const nlohmann::json & failure)
+{
+  std::string action = failure.value("node_type", failure.value("action", "mission action"));
+  std::string label;
+  for (std::size_t i = 0; i < action.size(); ++i) {
+    const auto character = static_cast<unsigned char>(action[i]);
+    if (character == '_' || character == '-') {
+      if (!label.empty() && label.back() != ' ') {label.push_back(' ');}
+      continue;
+    }
+    if (std::isupper(character) && !label.empty() && label.back() != ' ' &&
+      std::islower(static_cast<unsigned char>(label.back())))
+    {
+      label.push_back(' ');
+    }
+    label.push_back(static_cast<char>(std::tolower(character)));
+  }
+  while (!label.empty() && label.back() == ' ') {label.pop_back();}
+  constexpr std::string_view action_suffix = " action";
+  if (label.size() >= action_suffix.size() &&
+    label.compare(label.size() - action_suffix.size(), action_suffix.size(), action_suffix) == 0)
+  {
+    label.erase(label.size() - action_suffix.size());
+  }
+  if (label.empty()) {label = "mission";}
+
+  auto reason = failure.value("reason", std::string{});
+  if (reason.empty()) {reason = failure.value("terminal_error", std::string{});}
+  std::string message = "The mission stopped because the " + label + " step could not finish";
+  if (!reason.empty()) {
+    message += ": " + reason;
+    if (reason.back() != '.' && reason.back() != '!' && reason.back() != '?') {
+      message += ".";
+    }
+  } else {
+    message += ".";
+  }
+  return message;
 }
 
 static std::vector<std::string> loadSwitchableControllers(
@@ -211,6 +307,7 @@ static nlohmann::ordered_json loadRobotProfile(const std::string & robot_namespa
     }
   }
   nlohmann::ordered_json controllers = nlohmann::ordered_json::array();
+  nlohmann::ordered_json sensor_topics = nlohmann::ordered_json::object();
   if (controller_manager) {
     for (const auto & item : controller_manager) {
       if (!item.second.IsMap() || !item.second["type"]) {continue;}
@@ -222,11 +319,64 @@ static nlohmann::ordered_json loadRobotProfile(const std::string & robot_namespa
     }
   }
 
+  // Keep the sensor list from robot_description; associate it with the active
+  // broadcaster configuration, which may expose several outputs per sensor.
+  for (const auto & entry : params) {
+    const auto node_name = entry.first.as<std::string>();
+    if (node_name.rfind("/" + robot_namespace + "/controller/", 0) != 0 ||
+      !entry.second.IsMap()) {continue;}
+    const auto values = entry.second["ros__parameters"];
+    if (!values || !values.IsMap() || !values["sensor_name"] ||
+      !values["sensor_name"].IsScalar()) {continue;}
+    const auto sensor = values["sensor_name"].as<std::string>();
+    if (!sensor_topics.contains(sensor)) {
+      sensor_topics[sensor] = nlohmann::ordered_json::array();
+    }
+    for (const auto & parameter : values) {
+      const auto key = parameter.first.as<std::string>();
+      // yaw_topic_name is an input to the magnetometer broadcaster.
+      if (key != "topic_name" && key != "points_topic" && key != "ping_topic" &&
+        key != "up_vector_topic" && key != "temperature_topic" &&
+        key != "pressure_topic") {continue;}
+      if (!parameter.second.IsScalar()) {continue;}
+      auto topic = parameter.second.as<std::string>();
+      if (topic.empty()) {continue;}
+      if (topic.front() != '/') {
+        if (topic.rfind("~/", 0) == 0) {
+          topic = node_name + "/" + topic.substr(2);
+        } else if (key == "topic_name") {
+          topic = "/" + robot_namespace + "/controller/" + topic;
+        } else {
+          topic = "/" + robot_namespace + "/" + topic;
+        }
+      }
+      auto & topics = sensor_topics[sensor];
+      if (std::find(topics.begin(), topics.end(), topic) == topics.end()) {
+        topics.push_back(topic);
+      }
+    }
+  }
+  // The standard IMU broadcaster uses its default output name; this workspace
+  // declares that output in the robot's bringup YAML.
+  const auto imu = bringup["imu"];
+  if (imu && imu["raw_imu_topic"] && imu["raw_imu_topic"].IsScalar()) {
+    auto topic = imu["raw_imu_topic"].as<std::string>();
+    if (!topic.empty()) {
+      if (topic.front() != '/') {topic = "/" + robot_namespace + "/" + topic;}
+      auto & topics = sensor_topics["imu_sensor"];
+      if (std::find(topics.begin(), topics.end(), topic) == topics.end()) {
+        topics.push_back(topic);
+      }
+    }
+  }
+
   return {
     {"name", robot_namespace},
     {"sensors", nlohmann::ordered_json::array()},
+    {"sensor_topics", sensor_topics},
     {"actuators", nlohmann::ordered_json::array()},
     {"controllers", controllers},
+    {"cameras", nlohmann::ordered_json::array()},
     {"family", family.empty() ? nlohmann::ordered_json(nullptr) : nlohmann::ordered_json(family)},
     {"available_axes", nullptr}
   };
@@ -398,22 +548,55 @@ static void parseRenderedRobotDescription(
     }
   }
   profile["sensors"] = sensors;
+  for (const auto & sensor : sensors) {
+    if (!profile["sensor_topics"].contains(sensor)) {
+      profile["sensor_topics"][sensor] = nlohmann::ordered_json::array();
+    }
+  }
   profile["actuators"] = actuators;
   profile["available_axes"] = matrix ?
     availableAxesFromMatrix(*matrix, thruster_force_ranges, relative_axis_threshold) :
     nlohmann::ordered_json(nullptr);
 }
 
-static void writeMissionRobotProfiles(
+static nlohmann::ordered_json writeMissionRobotProfiles(
   const std::vector<std::string> & robots,
   const std::map<std::string, std_msgs::msg::Float64MultiArray> & allocation_matrices,
   const std::map<std::string, std_msgs::msg::String> & rendered_descriptions,
   const std::string & output_path,
   double relative_axis_threshold)
 {
+  // Cameras are configured by the operator in the generated profile. Preserve
+  // them when robot descriptions or allocation matrices refresh the file.
+  std::map<std::string, nlohmann::ordered_json> configured_cameras;
+  {
+    std::ifstream existing(output_path);
+    if (existing) {
+      try {
+        const auto previous = nlohmann::ordered_json::parse(existing);
+        if (previous.contains("robots") && previous["robots"].is_array()) {
+          for (const auto & robot : previous["robots"]) {
+            if (robot.is_object() && robot.contains("name") && robot["name"].is_string() &&
+              robot.contains("cameras") && robot["cameras"].is_array())
+            {
+              configured_cameras[robot["name"].get<std::string>()] = robot["cameras"];
+            }
+          }
+        }
+      } catch (const nlohmann::ordered_json::exception & exception) {
+        throw std::runtime_error(
+                "Could not read existing robot profile file " + output_path +
+                ": " + exception.what());
+      }
+    }
+  }
   nlohmann::ordered_json profiles = nlohmann::ordered_json::array();
   for (const auto & robot : robots) {
     auto profile = loadRobotProfile(robot);
+    const auto cameras = configured_cameras.find(robot);
+    if (cameras != configured_cameras.end()) {
+      profile["cameras"] = cameras->second;
+    }
     const auto description = rendered_descriptions.find(robot);
     const auto matrix = allocation_matrices.find(robot);
     if (description != rendered_descriptions.end()) {
@@ -434,6 +617,7 @@ static void writeMissionRobotProfiles(
     throw std::runtime_error("Could not write robot profile file: " + output_path);
   }
   output << nlohmann::ordered_json{{"robots", profiles}}.dump(2) << std::endl;
+  return profiles;
 }
 
 static std::string getTreeFile(
@@ -542,9 +726,194 @@ static std::string joinRobotNamespaces(const std::vector<std::string> & robots)
   return joined;
 }
 
+class MissionProgress
+{
+public:
+  MissionProgress(
+    const rclcpp::Node::SharedPtr & node, const BT::Blackboard::Ptr & blackboard,
+    const std::shared_ptr<sura_bt::MissionFailureReasons> & failure_reasons,
+    const std::shared_ptr<sura_safety::CriticalSafetyState> & critical_safety_state)
+  : blackboard_(blackboard), node_(node), failure_reasons_(failure_reasons),
+    critical_safety_state_(critical_safety_state),
+    session_id_(std::to_string(std::chrono::system_clock::now().time_since_epoch().count()))
+  {
+    publisher_ = node->create_publisher<std_msgs::msg::String>(
+      "~/mission_status", rclcpp::QoS(1).reliable().transient_local());
+    publish("idle");
+  }
+
+  void attach(BT::Tree & tree, const std::string & autonomous_file)
+  {
+    subscribers_.clear();
+    action_names_.clear();
+    tinyxml2::XMLDocument xml;
+    if (xml.LoadFile(autonomous_file.c_str()) == tinyxml2::XML_SUCCESS) {
+      std::function<void(const tinyxml2::XMLElement *)> visit =
+        [&](const tinyxml2::XMLElement * element) {
+          if (const char * name = element->Attribute("name")) {action_names_.insert(name);}
+          for (auto * child = element->FirstChildElement(); child;
+            child = child->NextSiblingElement()) {visit(child);}
+        };
+      if (auto * root = xml.RootElement()) {visit(root);}
+    }
+    for (const auto & node : tree.nodes) {
+      subscribers_.push_back(node->subscribeToStatusChange(
+        [this](BT::TimePoint, const BT::TreeNode & changed,
+          BT::NodeStatus, BT::NodeStatus status) {
+          if (changed.name() == "mission_running" && status == BT::NodeStatus::SUCCESS &&
+            !run_open_) {
+            ++run_number_;
+            run_open_ = true;
+            active_.clear();
+            completed_.clear();
+            completed_order_.clear();
+            failed_.clear();
+            failure_ = nullptr;
+            safety_ = nullptr;
+            failure_reasons_->clear();
+            event_ = {{"type", "mission_started"}};
+            events_.push_back(event_);
+            dirty_ = true;
+          }
+          if (changed.registrationName() == "MissionControl" &&
+            status == BT::NodeStatus::FAILURE) {control_failed_ = true;}
+          if (changed.type() != BT::NodeType::ACTION ||
+            action_names_.count(changed.name()) == 0 ||
+            changed.registrationName() == "VariableSet" ||
+            changed.registrationName() == "MissionCompleted") {return;}
+          const auto name = changed.name();
+          if (status == BT::NodeStatus::RUNNING && active_.insert(name).second) {
+            clearMissionErrorLog();
+            event_ = { {"type", "action_started"}, {"action", name},
+              {"node_type", changed.registrationName()} };
+            events_.push_back(event_);
+            dirty_ = true;
+          } else if (status == BT::NodeStatus::SUCCESS &&
+            completed_.insert(name).second) {
+            active_.erase(name);
+            completed_order_.push_back(name);
+            event_ = { {"type", "action_completed"}, {"action", name},
+              {"node_type", changed.registrationName()} };
+            events_.push_back(event_);
+            dirty_ = true;
+          } else if (status == BT::NodeStatus::FAILURE) {
+            active_.erase(name);
+            failed_.insert(name);
+            event_ = { {"type", "action_failed"}, {"action", name},
+              {"node_type", changed.registrationName()} };
+            const auto reason = failure_reasons_->take(name);
+            if (!reason.empty()) {event_["reason"] = reason;}
+            const auto terminal_error = takeRecentMissionErrorLog();
+            if (!terminal_error.empty()) {event_["terminal_error"] = terminal_error;}
+            failure_ = event_;
+          }
+        }));
+    }
+  }
+
+  void afterTick(bool safety_pending)
+  {
+    std::string raw;
+    blackboard_->get("mission_state", raw);
+    const std::string state = safety_pending ? "paused" : raw;
+    if (state == "aborted")
+    {
+      const auto critical = critical_safety_state_->first();
+      if (critical)
+      {
+        safety_ = {{"diagnostic", critical->first}, {"reason", critical->second}};
+      }
+    }
+    if (control_failed_ && raw == "running" && !safety_pending) {
+      blackboard_->set("mission_state", std::string("failed"));
+      control_failed_ = false;
+      if (!failure_.is_null()) {
+        if (!failure_.contains("reason") || failure_["reason"].get<std::string>().empty()) {
+          const auto terminal_error = failure_.value("terminal_error", std::string{});
+          if (!terminal_error.empty()) {failure_["reason"] = terminal_error;}
+        }
+        failure_["message"] = missionFailureMessage(failure_);
+      }
+      event_ = {{"type", "mission_finished"}, {"result", "failed"}};
+      if (!failure_.is_null()) {event_["message"] = failure_["message"];}
+      events_.push_back(event_);
+      run_open_ = false;
+      publish("failed");
+      return;
+    }
+    control_failed_ = false;
+    if (state == "running" && previous_state_ != "running" &&
+      previous_state_ != "paused") {
+      if (events_.empty()) {
+        event_ = {{"type", "mission_started"}};
+        events_.push_back(event_);
+      }
+      publish(state);
+      return;
+    }
+    if (state != previous_state_) {
+      if (state == "completed" || state == "aborted") {
+        event_ = {{"type", "mission_finished"}, {"result", state}};
+        events_.push_back(event_);
+        run_open_ = false;
+      } else if (state == "paused" || (state == "running" && previous_state_ == "paused")) {
+        event_ = {{"type", state == "paused" ? "mission_paused" : "mission_resumed"}};
+        events_.push_back(event_);
+      } else {
+        event_ = nullptr;
+      }
+      publish(state.empty() ? "idle" : state);
+    } else if (dirty_) {
+      publish(state.empty() ? "idle" : state);
+    }
+  }
+
+private:
+  void publish(const std::string & state)
+  {
+    nlohmann::json snapshot = {
+      {"session_id", session_id_}, {"run_id", run_number_},
+      {"sequence", ++sequence_}, {"timestamp", node_->now().seconds()},
+      {"state", state},
+      {"event", event_}, {"events", events_}, {"active_actions", active_},
+      {"completed_actions", completed_order_}, {"failed_actions", failed_},
+      {"failure", failure_}, {"safety", safety_}
+    };
+    if (!failure_.is_null() && failure_.contains("message")) {
+      snapshot["message"] = failure_["message"];
+    }
+    std_msgs::msg::String message;
+    message.data = snapshot.dump();
+    publisher_->publish(message);
+    previous_state_ = state;
+    dirty_ = false;
+    event_ = nullptr;
+    events_.clear();
+  }
+
+  BT::Blackboard::Ptr blackboard_;
+  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<sura_bt::MissionFailureReasons> failure_reasons_;
+  std::shared_ptr<sura_safety::CriticalSafetyState> critical_safety_state_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
+  std::string session_id_;
+  std::vector<BT::TreeNode::StatusChangeSubscriber> subscribers_;
+  std::set<std::string> action_names_, active_, completed_, failed_;
+  std::vector<std::string> completed_order_;
+  std::vector<nlohmann::json> events_;
+  nlohmann::json event_ = nullptr;
+  nlohmann::json failure_ = nullptr;
+  nlohmann::json safety_ = nullptr;
+  std::string previous_state_ = "idle";
+  uint64_t run_number_ = 0, sequence_ = 0;
+  bool dirty_ = false, control_failed_ = false, run_open_ = false;
+};
+
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
+  previous_logging_handler = rcutils_logging_get_output_handler();
+  rcutils_logging_set_output_handler(missionLoggingOutputHandler);
 
   auto ros_node = std::make_shared<rclcpp::Node>("sura_bt_runner");
 
@@ -605,7 +974,7 @@ int main(int argc, char ** argv)
     rclcpp::spin_some(ros_node);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
-  writeMissionRobotProfiles(
+  auto current_profiles = writeMissionRobotProfiles(
     robots, allocation_matrices, rendered_descriptions, profile_path, relative_axis_threshold);
   profile_dirty = false;
   RCLCPP_INFO(
@@ -653,8 +1022,12 @@ int main(int argc, char ** argv)
   auto blackboard = BT::Blackboard::create();
   auto safety_ask_state = std::make_shared<sura_safety::SafetyAskState>();
   auto mission_completed_actions = std::make_shared<std::unordered_set<std::string>>();
+  auto mission_failure_reasons = std::make_shared<sura_bt::MissionFailureReasons>();
+  auto critical_safety_state = std::make_shared<sura_safety::CriticalSafetyState>();
   blackboard->set("safety_ask_state", safety_ask_state);
   blackboard->set("mission_completed_actions", mission_completed_actions);
+  blackboard->set("mission_failure_reasons", mission_failure_reasons);
+  blackboard->set("critical_safety_state", critical_safety_state);
   for (const auto & robot : robots) {
     const auto family = loadRobotProfile(robot).value("family", nlohmann::ordered_json(nullptr));
     if (!family.is_string() || family.get<std::string>().empty()) {
@@ -662,6 +1035,19 @@ int main(int argc, char ** argv)
     }
     blackboard->set("robot_family_" + robot, family.get<std::string>());
   }
+  const auto set_available_axes = [&blackboard](const nlohmann::ordered_json & profiles) {
+    for (const auto & profile : profiles) {
+      if (!profile.contains("name") || !profile["name"].is_string()) {continue;}
+      std::vector<std::string> axes;
+      if (profile.contains("available_axes") && profile["available_axes"].is_array()) {
+        for (const auto & axis : profile["available_axes"]) {
+          if (axis.is_string()) {axes.push_back(axis.get<std::string>());}
+        }
+      }
+      blackboard->set("robot_available_axes_" + profile["name"].get<std::string>(), axes);
+    }
+  };
+  set_available_axes(current_profiles);
 
   const auto switchable_controllers =
     loadSwitchableControllers(robot_namespace);
@@ -739,6 +1125,9 @@ int main(int argc, char ** argv)
     };
 
   auto tree = build_tree();
+  MissionProgress mission_progress(
+    ros_node, blackboard, mission_failure_reasons, critical_safety_state);
+  mission_progress.attach(tree, autonomous_tree_file);
 
   auto publisher_zmq = std::make_unique<BT::PublisherZMQ>(tree);
   std::vector<BT::Tree> retired_trees;
@@ -775,6 +1164,7 @@ int main(int argc, char ** argv)
         publisher_zmq.reset();
         retired_trees.emplace_back(std::move(tree));
         tree = std::move(new_tree);
+        mission_progress.attach(tree, autonomous_tree_file);
         publisher_zmq = std::make_unique<BT::PublisherZMQ>(tree);
         safety_ask_coordinator.onReloadSuccess();
 
@@ -803,12 +1193,14 @@ int main(int argc, char ** argv)
   {
     tree.tickRoot();
     safety_ask_coordinator.publishPending();
+    mission_progress.afterTick(safety_ask_coordinator.pending());
 
     rclcpp::spin_some(ros_node);
     if (profile_dirty) {
       try {
-        writeMissionRobotProfiles(
-    robots, allocation_matrices, rendered_descriptions, profile_path, relative_axis_threshold);
+        current_profiles = writeMissionRobotProfiles(
+          robots, allocation_matrices, rendered_descriptions, profile_path, relative_axis_threshold);
+        set_available_axes(current_profiles);
         profile_dirty = false;
       } catch (const std::exception & exception) {
         RCLCPP_WARN(

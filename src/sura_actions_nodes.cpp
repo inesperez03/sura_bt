@@ -1162,4 +1162,269 @@ void GoToPoseAction::onHalted()
   }
 }
 
+OrbitPointAction::OrbitPointAction(
+  const std::string & name, const BT::NodeConfiguration & config)
+: BT::StatefulActionNode(name, config)
+{
+}
+
+BT::PortsList OrbitPointAction::providedPorts()
+{
+  return {
+    BT::InputPort<std::string>("robot_namespace", "Underwater robot that receives the orbit goal."),
+    BT::InputPort<double>("center_x", "Orbit center X in the server's configured frame."),
+    BT::InputPort<double>("center_y", "Orbit center Y in the server's configured frame."),
+    BT::InputPort<double>("center_z", "Orbit center Z in the server's configured frame."),
+    BT::InputPort<double>("radius", "Orbit radius in metres."),
+    BT::InputPort<bool>("use_planned_orbit", false,
+      "Use the center and radius planned in RViz; explicit coordinates are then optional."),
+    BT::InputPort<double>("timeout", 310.0,
+      "BT watchdog in seconds; the action server has its own configured timeout."),
+    BT::OutputPort<std::string>("message", "Result reported by the orbit action.")
+  };
+}
+
+const char * OrbitPointAction::main_description()
+{
+  return "Makes an underwater robot orbit a point once using OrbitPoint. "
+    "Configures and activates the lifecycle action server, then sends the goal. "
+    "Requires an AUV with lateral velocity control; use_planned_orbit selects the RViz plan.";
+}
+
+BT::NodeStatus OrbitPointAction::onStart()
+{
+  const auto node = getRosNode(config());
+  std::string robot_namespace;
+  try {
+    robot_namespace = requiredRobotNamespace(*this);
+  } catch (const BT::RuntimeError & e) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] %s", e.what());
+    return BT::NodeStatus::FAILURE;
+  }
+
+  std::string family;
+  if (!config().blackboard->get("robot_family_" + robot_namespace, family) ||
+    family != "underwater")
+  {
+    RCLCPP_ERROR(node->get_logger(),
+      "[sura_bt] OrbitPointAction requires an underwater robot profile for '%s'",
+      robot_namespace.c_str());
+    return BT::NodeStatus::FAILURE;
+  }
+
+  OrbitPoint::Goal goal;
+  goal.use_planned_orbit = getInput<bool>("use_planned_orbit").value_or(false);
+  if (!goal.use_planned_orbit) {
+    const auto x = getInput<double>("center_x");
+    const auto y = getInput<double>("center_y");
+    const auto z = getInput<double>("center_z");
+    const auto radius = getInput<double>("radius");
+    if (!x || !y || !z || !radius || !isFinite(x.value()) ||
+      !isFinite(y.value()) || !isFinite(z.value()) ||
+      !isFinite(radius.value()) || radius.value() <= 0.0)
+    {
+      RCLCPP_ERROR(node->get_logger(),
+        "[sura_bt] OrbitPointAction requires finite center_x, center_y, center_z and positive radius");
+      return BT::NodeStatus::FAILURE;
+    }
+    goal.center.x = x.value();
+    goal.center.y = y.value();
+    goal.center.z = z.value();
+    goal.radius = radius.value();
+  }
+
+  const double timeout = getInput<double>("timeout").value_or(310.0);
+  if (!isFinite(timeout) || timeout <= 0.0) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPointAction requires a positive timeout");
+    return BT::NodeStatus::FAILURE;
+  }
+  active_goal_timeout_ = timeout;
+
+  if (!prepareLifecycle(node)) {return BT::NodeStatus::FAILURE;}
+  action_client_ = rclcpp_action::create_client<OrbitPoint>(
+    node, "/" + robot_namespace + "/actions/orbit_point");
+  if (!action_client_->wait_for_action_server(std::chrono::seconds(10))) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint action server is not available");
+    stopLifecycle(node);
+    return BT::NodeStatus::FAILURE;
+  }
+
+  resetGoalState();
+  const auto goal_id = active_goal_id_;
+  auto options = rclcpp_action::Client<OrbitPoint>::SendGoalOptions();
+  options.goal_response_callback = [this, goal_id](GoalHandle::SharedPtr handle) {
+      std::lock_guard<std::mutex> lock(goal_mutex_);
+      if (goal_id != active_goal_id_ || cancel_requested_) {
+        if (handle) {(void)action_client_->async_cancel_goal(handle);}
+        return;
+      }
+      goal_response_received_ = true;
+      if (!handle) {goal_rejected_ = true; return;}
+      goal_handle_ = handle;
+    };
+  options.feedback_callback = [node](
+    GoalHandle::SharedPtr, const std::shared_ptr<const OrbitPoint::Feedback> feedback) {
+      RCLCPP_DEBUG(node->get_logger(),
+        "[sura_bt] OrbitPoint feedback: progress=%.3f radial_error=%.3f yaw_error=%.3f state=%s",
+        feedback->progress, feedback->radial_error, feedback->yaw_error,
+        feedback->state.c_str());
+    };
+  options.result_callback = [this, goal_id](const WrappedResult & result) {
+      std::lock_guard<std::mutex> lock(goal_mutex_);
+      if (goal_id != active_goal_id_) {return;}
+      wrapped_result_ = result;
+      result_received_ = true;
+    };
+  (void)action_client_->async_send_goal(goal, options);
+  active_goal_start_time_ = node->now();
+  RCLCPP_INFO(node->get_logger(), "[sura_bt] OrbitPoint goal sent to %s",
+    robot_namespace.c_str());
+  return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus OrbitPointAction::onRunning()
+{
+  const auto node = getRosNode(config());
+  if ((node->now() - active_goal_start_time_).seconds() > active_goal_timeout_) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint timed out in BT");
+    cancelGoal();
+    stopLifecycle(node);
+    return BT::NodeStatus::FAILURE;
+  }
+
+  WrappedResult result;
+  bool rejected = false;
+  {
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    rejected = goal_rejected_;
+    if (!rejected && (!goal_response_received_ || !result_received_)) {
+      return BT::NodeStatus::RUNNING;
+    }
+    if (!rejected) {result = wrapped_result_;}
+  }
+  if (rejected) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint goal was rejected");
+    cancelGoal();
+    stopLifecycle(node);
+    return BT::NodeStatus::FAILURE;
+  }
+
+  const auto action_result = result.result;
+  if (action_result) {setOutput("message", action_result->message);}
+  cancelGoal();
+  if (result.code == rclcpp_action::ResultCode::SUCCEEDED &&
+    action_result && action_result->success)
+  {
+    RCLCPP_INFO(node->get_logger(), "[sura_bt] OrbitPoint succeeded: %s",
+      action_result->message.c_str());
+    return BT::NodeStatus::SUCCESS;
+  }
+  RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint failed: %s",
+    action_result ? action_result->message.c_str() : "missing result");
+  return BT::NodeStatus::FAILURE;
+}
+
+void OrbitPointAction::onHalted()
+{
+  cancelGoal();
+  stopLifecycle(getRosNode(config()));
+}
+
+void OrbitPointAction::cancelGoal()
+{
+  std::lock_guard<std::mutex> lock(goal_mutex_);
+  cancel_requested_ = true;
+  active_goal_id_ = 0;
+  if (goal_handle_ && action_client_ && !result_received_) {
+    (void)action_client_->async_cancel_goal(goal_handle_);
+  }
+  goal_handle_.reset();
+}
+
+void OrbitPointAction::resetGoalState()
+{
+  std::lock_guard<std::mutex> lock(goal_mutex_);
+  active_goal_id_ = ++next_goal_id_;
+  goal_handle_.reset();
+  goal_response_received_ = false;
+  goal_rejected_ = false;
+  result_received_ = false;
+  cancel_requested_ = false;
+}
+
+bool OrbitPointAction::prepareLifecycle(const rclcpp::Node::SharedPtr & node)
+{
+  uint8_t state = lifecycle_msgs::msg::State::PRIMARY_STATE_UNKNOWN;
+  if (!getLifecycleState(node, state)) {return false;}
+  if (state == lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED) {
+    if (!changeLifecycleState(node, lifecycle_msgs::msg::Transition::TRANSITION_CONFIGURE) ||
+      !getLifecycleState(node, state)) {return false;}
+  }
+  if (state == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
+    if (!changeLifecycleState(node, lifecycle_msgs::msg::Transition::TRANSITION_ACTIVATE) ||
+      !getLifecycleState(node, state)) {return false;}
+  }
+  if (state != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint lifecycle state is %u", state);
+    return false;
+  }
+  return true;
+}
+
+void OrbitPointAction::stopLifecycle(const rclcpp::Node::SharedPtr & node)
+{
+  uint8_t state = lifecycle_msgs::msg::State::PRIMARY_STATE_UNKNOWN;
+  if (getLifecycleState(node, state, 1.0) &&
+    state == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE)
+  {
+    (void)changeLifecycleState(
+      node, lifecycle_msgs::msg::Transition::TRANSITION_DEACTIVATE, 1.0);
+  }
+}
+
+bool OrbitPointAction::getLifecycleState(
+  const rclcpp::Node::SharedPtr & node, uint8_t & state, double timeout_sec)
+{
+  constexpr auto lifecycle_name = "/orbit_point_lifecycle_action_node";
+  auto client = node->create_client<lifecycle_msgs::srv::GetState>(
+    std::string(lifecycle_name) + "/get_state");
+  if (!client->wait_for_service(std::chrono::duration<double>(timeout_sec))) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint get_state service unavailable");
+    return false;
+  }
+  auto future = client->async_send_request(
+    std::make_shared<lifecycle_msgs::srv::GetState::Request>());
+  if (rclcpp::spin_until_future_complete(
+      node, future, std::chrono::duration<double>(timeout_sec)) !=
+    rclcpp::FutureReturnCode::SUCCESS) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint get_state timed out");
+    return false;
+  }
+  state = future.get()->current_state.id;
+  return true;
+}
+
+bool OrbitPointAction::changeLifecycleState(
+  const rclcpp::Node::SharedPtr & node, uint8_t transition, double timeout_sec)
+{
+  constexpr auto lifecycle_name = "/orbit_point_lifecycle_action_node";
+  auto client = node->create_client<lifecycle_msgs::srv::ChangeState>(
+    std::string(lifecycle_name) + "/change_state");
+  if (!client->wait_for_service(std::chrono::duration<double>(timeout_sec))) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint change_state service unavailable");
+    return false;
+  }
+  auto request = std::make_shared<lifecycle_msgs::srv::ChangeState::Request>();
+  request->transition.id = transition;
+  auto future = client->async_send_request(request);
+  if (rclcpp::spin_until_future_complete(
+      node, future, std::chrono::duration<double>(timeout_sec)) !=
+    rclcpp::FutureReturnCode::SUCCESS || !future.get()->success) {
+    RCLCPP_ERROR(node->get_logger(), "[sura_bt] OrbitPoint lifecycle transition %u failed",
+      transition);
+    return false;
+  }
+  return true;
+}
+
 }  // namespace sura_bt

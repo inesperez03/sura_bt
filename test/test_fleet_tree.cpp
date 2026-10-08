@@ -258,5 +258,8 @@ TEST(FleetTree, AutonomousActionsReceiveCheckpoints)
   ASSERT_NE(sequence, nullptr);
   EXPECT_NE(xml.find("<MissionCheckpoint"), std::string::npos);
   EXPECT_NE(xml.find("<SendVelocity"), std::string::npos);
+  EXPECT_NE(xml.find("<AvoidObstacle"), std::string::npos);
+  EXPECT_NE(xml.find("<DetectSeafloorAnomalies"), std::string::npos);
+  EXPECT_NE(xml.find("<AnalyzePhoto"), std::string::npos);
   EXPECT_NE(xml.find("<SurfaceAction"), std::string::npos);
 }

@@ -172,7 +172,8 @@ BT::NodeStatus AutonomousRequested::tick()
   {
     std::string mission_state;
     if (config().blackboard->get("mission_state", mission_state) &&
-      (mission_state == "completed" || mission_state == "aborted" || mission_state == "paused"))
+      (mission_state == "completed" || mission_state == "aborted" ||
+      mission_state == "failed" || mission_state == "paused"))
     {
       config().blackboard->set("mission_state", std::string{"requested"});
     }
@@ -417,7 +418,7 @@ BT::NodeStatus MissionControl::tick()
 {
   std::string mission_state;
   if (config().blackboard->get("mission_state", mission_state) &&
-    mission_state == "aborted")
+    (mission_state == "aborted" || mission_state == "failed"))
   {
     current_child_idx_ = 0;
     haltChildren();

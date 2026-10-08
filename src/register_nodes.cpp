@@ -3,9 +3,12 @@
 #include <string>
 
 #include "sura_bt/camera_nodes.hpp"
+#include "sura_bt/analyze_photo.hpp"
+#include "sura_bt/avoid_obstacle.hpp"
 #include "sura_bt/command_nodes.hpp"
 #include "sura_bt/controller_switch_nodes.hpp"
 #include "sura_bt/operation_mode_nodes.hpp"
+#include "sura_bt/seafloor_anomaly_nodes.hpp"
 #include "sura_bt/sura_actions_nodes.hpp"
 
 namespace sura_bt
@@ -38,6 +41,9 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   registerNodeWithDescription<TakePhoto>(
     factory, "TakePhoto");
 
+  registerNodeWithDescription<AnalyzePhoto>(
+    factory, "AnalyzePhoto");
+
   registerNodeWithDescription<ActivateControllers>(
     factory, "ActivateControllers");
 
@@ -55,6 +61,15 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
 
   registerNodeWithDescription<GoToPoseAction>(
     factory, "GoToPoseAction");
+
+  registerNodeWithDescription<OrbitPointAction>(
+    factory, "OrbitPointAction");
+
+  registerNodeWithDescription<AvoidObstacle>(
+    factory, "AvoidObstacle");
+
+  registerNodeWithDescription<DetectSeafloorAnomalies>(
+    factory, "DetectSeafloorAnomalies");
 
 
   registerNodeWithDescription<TeleopRequested>(

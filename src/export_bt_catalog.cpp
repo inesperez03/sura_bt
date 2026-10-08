@@ -118,6 +118,13 @@ nlohmann::json buildCatalogJson(const BT::BehaviorTreeFactory & factory)
       z_port["required"] = false;
       z_port["required_for_family"] = {"underwater"};
     }
+    if (node_id == "OrbitPointAction") {
+      for (const auto & coordinate : {"center_x", "center_y", "center_z", "radius"}) {
+        auto & port = catalog["nodes"][node_id]["ports"][coordinate];
+        port["required"] = false;
+        port["required_when"] = {{"use_planned_orbit", "false"}};
+      }
+    }
     if (node_id == "SetControllerInterlock") {
       auto & controllers = catalog["nodes"][node_id]["ports"]["controllers"];
       controllers["required"] = false;

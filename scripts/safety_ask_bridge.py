@@ -13,6 +13,8 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 TOPIC = "/sura_bt_runner/safety_ask"
+MISSION_TOPIC = "/sura_bt_runner/mission_status"
+VISION_TOPIC = "/sura_bt_runner/vision_answers"
 WORKSPACE = Path(os.environ.get("SURA_WS_META", Path(__file__).resolve().parents[3]))
 
 
@@ -23,8 +25,39 @@ def listen():
     qos.reliability = ReliabilityPolicy.RELIABLE
     qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
     node.create_subscription(String, TOPIC, lambda msg: print(msg.data or "{}", flush=True), qos)
+    node.create_subscription(String, MISSION_TOPIC,
+                             lambda msg: print(json.dumps({"mission_status": json.loads(msg.data)},
+                                                          ensure_ascii=False), flush=True), qos)
+    vision_qos = QoSProfile(depth=10)
+    vision_qos.reliability = ReliabilityPolicy.RELIABLE
+    vision_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+    def forward_vision(msg):
+        try:
+            event = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        print(json.dumps({"vision_answer": event}, ensure_ascii=False), flush=True)
+    node.create_subscription(String, VISION_TOPIC, forward_vision, vision_qos)
     try:
         rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def mission_status():
+    rclpy.init()
+    node = rclpy.create_node("sura_mission_status_reader")
+    qos = QoSProfile(depth=1)
+    qos.reliability = ReliabilityPolicy.RELIABLE
+    qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+    received = []
+    node.create_subscription(String, MISSION_TOPIC, lambda msg: received.append(msg.data), qos)
+    try:
+        end = time.monotonic() + 2.0
+        while not received and time.monotonic() < end:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        print(received[-1] if received else "{}", flush=True)
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -114,15 +147,80 @@ def capture(robot, requested_topic=""):
         rclpy.shutdown()
 
 
+def bounded_value(value, depth=0):
+    """Render ROS fields without serializing unbounded images or point clouds."""
+    if depth >= 4:
+        return "<nested value>"
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"length": len(value), "preview": list(value[:8])}
+    if getattr(value, "ndim", 1) == 0 and hasattr(value, "item"):
+        return value.item()
+    if isinstance(value, (list, tuple)) or hasattr(value, "tolist"):
+        length = len(value)
+        return {"length": length, "values": [bounded_value(item, depth + 1) for item in value[:8]]}
+    if hasattr(value, "get_fields_and_field_types"):
+        return {key: bounded_value(getattr(value, key), depth + 1)
+                for key in list(value.get_fields_and_field_types())[:24]}
+    if isinstance(value, str):
+        return value[:200]
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def sample_topic(topic):
+    from rosidl_runtime_py.utilities import get_message
+    from rclpy.qos import qos_profile_sensor_data
+
+    if not topic.startswith("/") or topic == "/":
+        raise ValueError("Use an absolute ROS topic name")
+    rclpy.init()
+    node = rclpy.create_node("sura_mission_topic_sample")
+    subscription = None
+    try:
+        end = time.monotonic() + 2.0
+        types = []
+        while time.monotonic() < end:
+            types = node.get_topic_names_and_types()
+            matching = next((kinds for name, kinds in types if name == topic), [])
+            if matching:
+                break
+            rclpy.spin_once(node, timeout_sec=0.1)
+        else:
+            raise RuntimeError(f"Topic not found: {topic}")
+        if len(matching) != 1:
+            raise RuntimeError(f"Topic has multiple message types: {topic}")
+        received = []
+        subscription = node.create_subscription(
+            get_message(matching[0]), topic, received.append, qos_profile_sensor_data)
+        end = time.monotonic() + 4.0
+        while not received and time.monotonic() < end:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        if not received:
+            raise RuntimeError(f"No recent message on {topic}")
+        print(json.dumps({"topic": topic, "type": matching[0],
+                          "received_at": time.time(), "value": bounded_value(received[0])},
+                         ensure_ascii=False), flush=True)
+    finally:
+        if subscription is not None:
+            node.destroy_subscription(subscription)
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["listen", "cameras", "capture", "resume", "abort"])
+    parser.add_argument("command", choices=["listen", "status", "cameras", "capture", "sample", "resume", "abort"])
     parser.add_argument("--robot", default="")
     parser.add_argument("--topic", default="")
     args = parser.parse_args()
     try:
         if args.command == "listen":
             listen()
+        elif args.command == "status":
+            mission_status()
+        elif args.command == "sample":
+            sample_topic(args.topic)
         elif args.command in {"cameras", "capture"}:
             if not args.robot or "/" in args.robot:
                 raise ValueError("--robot must be a robot namespace")

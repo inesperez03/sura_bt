@@ -11,6 +11,7 @@ find_package(rclcpp_action REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
@@ -20,18 +21,24 @@ find_package(controller_manager_msgs REQUIRED)
 find_package(sura_actions REQUIRED)
 find_package(sura_safety REQUIRED)
 find_package(sura_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TINYXML2 REQUIRED IMPORTED_TARGET tinyxml2)
+pkg_check_modules(LIBCURL REQUIRED IMPORTED_TARGET libcurl)
 
 set(SURA_BT_NODE_SOURCES
   src/fleet_tree.cpp
   src/controller_switch_nodes.cpp
   src/operation_mode_nodes.cpp
   src/camera_nodes.cpp
+  src/analyze_photo.cpp
   src/command_nodes.cpp
   src/sura_actions_nodes.cpp
+  src/avoid_obstacle.cpp
+  src/seafloor_anomaly_nodes.cpp
   src/register_nodes.cpp
 )
 
@@ -65,6 +72,7 @@ ament_target_dependencies(bt_runner
   std_srvs
   std_msgs
   sensor_msgs
+  geometry_msgs
   diagnostic_msgs
   cv_bridge
   lifecycle_msgs
@@ -74,6 +82,8 @@ ament_target_dependencies(bt_runner
   sura_actions
   sura_safety
   sura_msgs
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 ament_target_dependencies(export_bt_catalog
@@ -82,6 +92,7 @@ ament_target_dependencies(export_bt_catalog
   std_srvs
   std_msgs
   sensor_msgs
+  geometry_msgs
   diagnostic_msgs
   cv_bridge
   lifecycle_msgs
@@ -91,17 +102,21 @@ ament_target_dependencies(export_bt_catalog
   sura_actions
   sura_safety
   sura_msgs
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 target_link_libraries(bt_runner
   yaml-cpp
   nlohmann_json::nlohmann_json
   PkgConfig::TINYXML2
+  PkgConfig::LIBCURL
 )
 
 target_link_libraries(export_bt_catalog
   nlohmann_json::nlohmann_json
   PkgConfig::TINYXML2
+  PkgConfig::LIBCURL
 )
 
 install(
@@ -114,7 +129,7 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/safety_ask_bridge.py
+install(PROGRAMS scripts/safety_ask_bridge.py scripts/start_qwen_vl_cpu.sh
   DESTINATION lib/${PROJECT_NAME})
 
 install(
@@ -148,6 +163,31 @@ if(BUILD_TESTING)
     rclcpp std_msgs std_srvs sura_safety diagnostic_msgs behaviortree_cpp_v3)
   target_link_libraries(test_safety_ask_coordinator
     nlohmann_json::nlohmann_json PkgConfig::TINYXML2)
+
+  ament_add_gtest(test_avoid_obstacle
+    test/test_avoid_obstacle.cpp
+    src/avoid_obstacle.cpp)
+  target_include_directories(test_avoid_obstacle PRIVATE include)
+  target_compile_features(test_avoid_obstacle PRIVATE cxx_std_17)
+  ament_target_dependencies(test_avoid_obstacle
+    rclcpp behaviortree_cpp_v3 diagnostic_msgs sura_actions sura_msgs sura_safety)
+
+  ament_add_gtest(test_seafloor_anomalies
+    test/test_seafloor_anomalies.cpp
+    src/seafloor_anomaly_nodes.cpp)
+  target_include_directories(test_seafloor_anomalies PRIVATE include)
+  target_compile_features(test_seafloor_anomalies PRIVATE cxx_std_17)
+  ament_target_dependencies(test_seafloor_anomalies
+    rclcpp behaviortree_cpp_v3 geometry_msgs sensor_msgs tf2_ros tf2_geometry_msgs)
+
+  ament_add_gtest(test_analyze_photo
+    test/test_analyze_photo.cpp src/analyze_photo.cpp src/camera_nodes.cpp)
+  target_include_directories(test_analyze_photo PRIVATE include)
+  target_compile_features(test_analyze_photo PRIVATE cxx_std_17)
+  ament_target_dependencies(test_analyze_photo
+    rclcpp behaviortree_cpp_v3 sensor_msgs std_msgs cv_bridge)
+  target_link_libraries(test_analyze_photo
+    nlohmann_json::nlohmann_json PkgConfig::LIBCURL)
 endif()
 
 ament_package()

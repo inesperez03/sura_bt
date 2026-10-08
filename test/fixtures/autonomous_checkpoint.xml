@@ -2,6 +2,12 @@
   <BehaviorTree ID="AutonomousBranch">
     <Sequence>
       <SendVelocity name="first_move" robot_namespace="robot_a" linear_x="0.2"/>
+      <AvoidObstacle name="avoid_front" robot_namespace="robot_a" side="right"/>
+      <DetectSeafloorAnomalies name="scan_bottom" robot_namespace="robot_a"/>
+      <TakePhoto name="capture" robot_namespace="robot_a" topic="camera/image"
+                 image_path="{photo_path}"/>
+      <AnalyzePhoto name="analyze_capture" robot_namespace="robot_a"
+                    image_path="{photo_path}" answer="{photo_answer}"/>
       <SurfaceAction name="surface" robot_namespace="robot_a"/>
     </Sequence>
   </BehaviorTree>

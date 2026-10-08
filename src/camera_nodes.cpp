@@ -1,4 +1,5 @@
 #include "sura_bt/camera_nodes.hpp"
+#include "sura_bt/mission_failure_reasons.hpp"
 
 #include <cv_bridge/cv_bridge.h>
 
@@ -150,7 +151,8 @@ std::string TakePhoto::makeOutputPath(
            << std::setw(9) << std::setfill('0') << stamp.nanoseconds() % 1000000000LL
            << ".png";
 
-  return (std::filesystem::path(PHOTO_OUTPUT_DIR) / filename.str()).string();
+  return std::filesystem::absolute(
+    std::filesystem::path(PHOTO_OUTPUT_DIR) / filename.str()).string();
 }
 
 TakePhoto::TakePhoto(
@@ -164,14 +166,15 @@ BT::PortsList TakePhoto::providedPorts()
 {
   return {
     BT::InputPort<std::string>("robot_namespace", "Robot namespace whose camera is used."),
-    BT::InputPort<std::string>("topic", "Image topic to capture from.")
+    BT::InputPort<std::string>("topic", "Image topic to capture from."),
+    BT::OutputPort<std::string>("image_path", "Absolute path of the saved PNG image.")
   };
 }
 
 const char * TakePhoto::main_description()
 {
-  return "Compatibilidad: cualquier plataforma con una cámara que publique el topic de imagen "
-    "indicado (resuelto dentro de robot_namespace). Guarda la captura como PNG.";
+  return "Captures an image from a robot camera topic, saves it as PNG, and outputs its "
+    "absolute image_path for later analysis.";
 }
 
 BT::NodeStatus TakePhoto::tick()
@@ -181,6 +184,7 @@ BT::NodeStatus TakePhoto::tick()
 
   if (!topic || topic.value().empty())
   {
+    recordMissionFailure(config(), name(), "No camera topic is configured for this capture.");
     RCLCPP_ERROR(
       ros_node->get_logger(),
       "[sura_bt] TakePhoto requires non-empty topic input");
@@ -225,6 +229,12 @@ BT::NodeStatus TakePhoto::tick()
 
   if (!captured_image)
   {
+    std::ostringstream elapsed;
+    elapsed << PHOTO_TIMEOUT_SEC;
+    recordMissionFailure(
+      config(), name(),
+      "No image arrived on topic " + resolved_topic + " within " + elapsed.str() +
+      " seconds. Check that the camera is active and publishing images.");
     RCLCPP_ERROR(
       ros_node->get_logger(),
       "[sura_bt] TakePhoto timed out waiting %.3fs for image topic %s",
@@ -239,6 +249,10 @@ BT::NodeStatus TakePhoto::tick()
   std::string error;
   if (!saveImage(*captured_image, path, error))
   {
+    recordMissionFailure(
+      config(), name(),
+      "The camera published an image, but it could not be saved from " + resolved_topic +
+      ": " + error);
     RCLCPP_ERROR(
       ros_node->get_logger(),
       "[sura_bt] TakePhoto failed to save image from %s: %s",
@@ -252,6 +266,8 @@ BT::NodeStatus TakePhoto::tick()
     "[sura_bt] Action: take photo. topic=%s path=%s",
     resolved_topic.c_str(),
     path.c_str());
+
+  setOutput("image_path", path);
 
   return BT::NodeStatus::SUCCESS;
 }

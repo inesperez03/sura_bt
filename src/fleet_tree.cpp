@@ -198,8 +198,9 @@ std::string checkpointedAutonomousTreeXml(const std::string & file)
   }
 
   const std::set<std::string> checkpointed_actions = {
-    "Delay", "GoToPoseAction", "SendVelocity", "SendWrench",
-    "SurfaceAction", "TakePhoto"};
+    "Delay", "GoToPoseAction", "AvoidObstacle", "DetectSeafloorAnomalies",
+    "SendVelocity", "SendWrench",
+    "SurfaceAction", "TakePhoto", "AnalyzePhoto"};
   std::map<std::string, unsigned> occurrences;
   std::function<void(tinyxml2::XMLNode *)> visit = [&](tinyxml2::XMLNode * parent) {
     for (auto * node = parent->FirstChild(); node; )

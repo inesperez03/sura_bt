@@ -13,6 +13,7 @@
 #include "lifecycle_msgs/srv/get_state.hpp"
 #include "sura_actions/action/go_to_pose.hpp"
 #include "sura_actions/action/go_to_pose_usv.hpp"
+#include "sura_actions/action/orbit_point.hpp"
 #include "sura_actions/action/surface.hpp"
 
 namespace sura_bt
@@ -180,6 +181,44 @@ public:
 private:
   BT::NodeStatus tickBackend();
   std::unique_ptr<BT::StatefulActionNode> backend_;
+};
+
+class OrbitPointAction : public BT::StatefulActionNode
+{
+public:
+  using OrbitPoint = sura_actions::action::OrbitPoint;
+  using GoalHandle = rclcpp_action::ClientGoalHandle<OrbitPoint>;
+  using WrappedResult = GoalHandle::WrappedResult;
+
+  OrbitPointAction(const std::string & name, const BT::NodeConfiguration & config);
+  static BT::PortsList providedPorts();
+  static const char * main_description();
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
+
+private:
+  bool prepareLifecycle(const rclcpp::Node::SharedPtr & node);
+  void stopLifecycle(const rclcpp::Node::SharedPtr & node);
+  bool getLifecycleState(
+    const rclcpp::Node::SharedPtr & node, uint8_t & state, double timeout_sec = 10.0);
+  bool changeLifecycleState(
+    const rclcpp::Node::SharedPtr & node, uint8_t transition, double timeout_sec = 10.0);
+  void cancelGoal();
+  void resetGoalState();
+
+  rclcpp_action::Client<OrbitPoint>::SharedPtr action_client_;
+  std::mutex goal_mutex_;
+  GoalHandle::SharedPtr goal_handle_;
+  WrappedResult wrapped_result_;
+  bool goal_response_received_{false};
+  bool goal_rejected_{false};
+  bool result_received_{false};
+  bool cancel_requested_{false};
+  uint64_t active_goal_id_{0};
+  uint64_t next_goal_id_{0};
+  double active_goal_timeout_{310.0};
+  rclcpp::Time active_goal_start_time_;
 };
 
 }  // namespace sura_bt
